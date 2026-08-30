@@ -1,10 +1,10 @@
-import { type ChangeEvent, type ReactNode, createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Link, Route, Switch, Router as WouterRouter, useLocation } from 'wouter';
-import { Activity, ArrowLeft, Bell, BookOpen, Camera, Check, ChevronRight, CircleHelp, Coffee, Droplets, Flame, Gauge, Goal, Heart, Home, Info, Leaf, Moon, NotebookPen, Plus, Scale, Settings, ShoppingBasket, Sparkles, Sun, Target, TrendingUp, Upload, Utensils, WalletCards, Wheat, X, Zap } from 'lucide-react';
+import { Activity, ArrowLeft, Bell, BookOpen, Camera, Check, ChevronRight, CircleHelp, Coffee, Droplets, Flame, Gauge, Goal, Heart, Home, Info, Leaf, Moon, NotebookPen, Plus, Scale, Settings, ShoppingBasket, Sparkles, Sun, Target, TrendingUp, Utensils, WalletCards, Wheat, X, Zap, RefreshCw, Key } from 'lucide-react';
 
 type HabitKey = 'shake' | 'oil' | 'snack' | 'workout';
 type Period = 'يومي' | 'أسبوعي' | 'شهري';
@@ -40,7 +40,7 @@ function readSaved(): AppData {
         scannedFoods: Array.isArray(parsed.scannedFoods) ? parsed.scannedFoods : [],
       };
     }
-  } catch { /* first run or blocked storage */ }
+  } catch { /* first run */ }
   return emptyData;
 }
 
@@ -52,6 +52,7 @@ type RafiqContextValue = {
   addCalories: (calories: number, label?: string) => void;
   addWeight: (weight: number) => void;
   recordScanned: (food: ScannedFood) => void;
+  restoreAllData: (importedData: AppData) => void;
   notify: (message: string) => void;
   theme: ThemeMode;
   toggleTheme: () => void;
@@ -71,6 +72,7 @@ function RafiqProvider({ children }: { children: ReactNode }) {
     return saved === 'dark' || saved === 'light' ? saved : 'light';
   });
   const [toast, setToast] = useState('');
+
   useEffect(() => localStorage.setItem('rafiq-health-data', JSON.stringify({ version: STORAGE_VERSION, ...data })), [data]);
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
@@ -78,9 +80,10 @@ function RafiqProvider({ children }: { children: ReactNode }) {
   }, [theme]);
   useEffect(() => {
     if (!toast) return;
-    const timer = window.setTimeout(() => setToast(''), 2600);
+    const timer = window.setTimeout(() => setToast(''), 3000);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
   const todayLog = data.logs.find((log) => log.date === todayKey()) ?? { date: todayKey(), calories: 0, habits: { shake: false, oil: false, snack: false, workout: false } };
   const updateSettings = (next: Partial<SettingsData>) => setData((current) => ({ ...current, settings: { ...current.settings, ...next } }));
   const toggleHabit = (habit: HabitKey) => {
@@ -107,17 +110,25 @@ function RafiqProvider({ children }: { children: ReactNode }) {
     setToast('تم حفظ قياس اليوم');
   };
   const recordScanned = (food: ScannedFood) => setData((current) => ({ ...current, scannedFoods: [food, ...current.scannedFoods.filter((item) => item.query !== food.query)].slice(0, 12) }));
+
+  const restoreAllData = (importedData: AppData) => {
+    setData(importedData);
+    localStorage.setItem('rafiq-health-data', JSON.stringify({ version: STORAGE_VERSION, ...importedData }));
+    setToast('تم استرجاع الحساب بنجاح وعرض كافة البيانات!');
+  };
+
   const notify = (message: string) => setToast(message);
   const toggleTheme = () => setTheme((current) => current === 'light' ? 'dark' : 'light');
-  return <RafiqContext.Provider value={{ data, todayLog, updateSettings, toggleHabit, addCalories, addWeight, recordScanned, notify, theme, toggleTheme }}>
+
+  return <RafiqContext.Provider value={{ data, todayLog, updateSettings, toggleHabit, addCalories, addWeight, recordScanned, restoreAllData, notify, theme, toggleTheme }}>
     {children}
-    {toast && <div className="fixed bottom-24 left-1/2 z-50 -translate-x-1/2 rounded-full bg-[hsl(var(--foreground))] px-5 py-3 text-sm font-semibold text-[hsl(var(--background))] shadow-lg md:bottom-7" role="status" data-testid="status-toast">{toast}</div>}
+    {toast && <div className="fixed bottom-24 left-1/2 z-50 -translate-x-1/2 w-max max-w-[90vw] rounded-full bg-[hsl(var(--foreground))] px-5 py-3 text-sm font-semibold text-[hsl(var(--background))] shadow-xl md:bottom-7">{toast}</div>}
   </RafiqContext.Provider>;
 }
 
 const navItems = [
   { href: '/', label: 'نظرتي اليوم', icon: Home },
-  { href: '/tracker', label: 'متابعة العادات', icon: NotebookPen },
+  { href: '/tracker', label: 'العادات', icon: NotebookPen },
   { href: '/scanner', label: 'قدّر وجبتك', icon: Camera },
   { href: '/guide', label: 'دليل الأكل', icon: BookOpen },
 ];
@@ -137,19 +148,17 @@ function ThemeToggle({ mobile = false }: { mobile?: boolean }) {
     className={mobile
       ? 'flex h-11 w-11 items-center justify-center rounded-full border bg-[hsl(var(--card)/.94)] text-[hsl(var(--foreground))] shadow-md backdrop-blur transition-colors hover:bg-[hsl(var(--muted))]'
       : 'flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-semibold text-[hsl(var(--sidebar-foreground)/.64)] hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-foreground))]'}
-    aria-label={isDark ? 'تفعيل الوضع الفاتح' : 'تفعيل الوضع الداكن'}
     title={isDark ? 'الوضع الفاتح' : 'الوضع الداكن'}
-    data-testid="button-theme-toggle"
   >
     {isDark ? <Sun size={18} /> : <Moon size={18} />}
-    {!mobile && <><span>{isDark ? 'الوضع الفاتح' : 'الوضع الداكن'}</span><span className="mr-auto text-[10px] text-[hsl(var(--sidebar-foreground)/.42)]">{isDark ? 'LIGHT' : 'DARK'}</span></>}
+    {!mobile && <><span>{isDark ? 'الوضع الفاتح' : 'الوضع الداكن'}</span></>}
   </button>;
 }
 
-function Sidebar() {
+function Sidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
   const [location] = useLocation();
   const { data, updateSettings, notify } = useRafiq();
-  const [settingsOpen, setSettingsOpen] = useState(false);
+
   const requestNotifications = () => {
     if (!('Notification' in window)) { notify('التنبيهات غير متاحة في هذا المتصفح'); return; }
     Notification.requestPermission().then((permission) => {
@@ -158,65 +167,123 @@ function Sidebar() {
       notify(enabled ? 'تم تفعيل تذكيرات رفيق' : 'يمكنك تفعيلها لاحقاً من إعدادات المتصفح');
     });
   };
-  return <>
-    <aside className="hidden w-[246px] shrink-0 flex-col bg-[hsl(var(--sidebar))] px-5 py-7 text-[hsl(var(--sidebar-foreground))] md:flex" dir="rtl">
-      <BrandMark />
-      <div className="mt-12 px-2 text-[11px] font-semibold tracking-[.15em] text-[hsl(var(--sidebar-foreground)/.45)]">مساحتك اليومية</div>
-      <nav className="mt-3 space-y-1.5">
-        {navItems.map(({ href, label, icon: Icon }) => <Link key={href} href={href} className={`flex items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-semibold transition-colors ${location === href ? 'nav-active' : 'text-[hsl(var(--sidebar-foreground)/.64)] hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-foreground))]'}`} data-testid={`link-nav-${href === '/' ? 'home' : href.slice(1)}`}>
-          <Icon size={18} strokeWidth={location === href ? 2.4 : 1.8} /><span>{label}</span>{location === href && <span className="mr-auto h-1.5 w-1.5 rounded-full bg-[hsl(var(--sidebar-primary))]" />}
-        </Link>)}
-      </nav>
-      <div className="mt-auto">
-        <div className="mb-5 rounded-2xl border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-accent)/.5)] p-4">
-          <div className="mb-2 flex items-center justify-between text-xs text-[hsl(var(--sidebar-foreground)/.6)]"><span>الهدف اليومي</span><Target size={15} className="text-[hsl(var(--sidebar-primary))]" /></div>
-          <div className="text-xl font-bold" dir="ltr">{data.settings.dailyGoal.toLocaleString('ar-EG')} <span className="text-xs font-medium text-[hsl(var(--sidebar-foreground)/.55)]">سعرة</span></div>
-          <div className="mt-3 h-1.5 rounded-full bg-[hsl(var(--sidebar-foreground)/.13)]"><div className="h-full rounded-full bg-[hsl(var(--sidebar-primary))]" style={{ width: `${Math.min(100, (data.logs.find((l) => l.date === todayKey())?.calories ?? 0) / data.settings.dailyGoal * 100)}%` }} /></div>
-        </div>
-        <button onClick={() => setSettingsOpen(true)} className="flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-semibold text-[hsl(var(--sidebar-foreground)/.64)] hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-foreground))]" data-testid="button-open-settings"><Settings size={18} /><span>الإعدادات</span></button>
-        <button onClick={requestNotifications} className="mt-1 flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-semibold text-[hsl(var(--sidebar-foreground)/.64)] hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-foreground))]" data-testid="button-notification-settings"><Bell size={18} /><span>{data.settings.notificationsEnabled ? 'التذكيرات مفعّلة' : 'فعّل التذكيرات'}</span></button>
-        <div className="mt-1"><ThemeToggle /></div>
+
+  return <aside className="hidden w-[246px] shrink-0 flex-col bg-[hsl(var(--sidebar))] px-5 py-7 text-[hsl(var(--sidebar-foreground))] md:flex" dir="rtl">
+    <BrandMark />
+    <div className="mt-12 px-2 text-[11px] font-semibold tracking-[.15em] text-[hsl(var(--sidebar-foreground)/.45)]">مساحتك اليومية</div>
+    <nav className="mt-3 space-y-1.5">
+      {navItems.map(({ href, label, icon: Icon }) => <Link key={href} href={href} className={`flex items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-semibold transition-colors ${location === href ? 'nav-active' : 'text-[hsl(var(--sidebar-foreground)/.64)] hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-foreground))]'}`}>
+        <Icon size={18} strokeWidth={location === href ? 2.4 : 1.8} /><span>{label}</span>{location === href && <span className="mr-auto h-1.5 w-1.5 rounded-full bg-[hsl(var(--sidebar-primary))]" />}
+      </Link>)}
+    </nav>
+    <div className="mt-auto">
+      <div className="mb-5 rounded-2xl border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-accent)/.5)] p-4">
+        <div className="mb-2 flex items-center justify-between text-xs text-[hsl(var(--sidebar-foreground)/.6)]"><span>الهدف اليومي</span><Target size={15} className="text-[hsl(var(--sidebar-primary))]" /></div>
+        <div className="text-xl font-bold" dir="ltr">{data.settings.dailyGoal.toLocaleString('ar-EG')} <span className="text-xs font-medium text-[hsl(var(--sidebar-foreground)/.55)]">سعرة</span></div>
+        <div className="mt-3 h-1.5 rounded-full bg-[hsl(var(--sidebar-foreground)/.13)]"><div className="h-full rounded-full bg-[hsl(var(--sidebar-primary))]" style={{ width: `${Math.min(100, (data.logs.find((l) => l.date === todayKey())?.calories ?? 0) / data.settings.dailyGoal * 100)}%` }} /></div>
       </div>
-    </aside>
-    {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} onNotify={requestNotifications} />}
-  </>;
+      <button onClick={onOpenSettings} className="flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-semibold text-[hsl(var(--sidebar-foreground)/.64)] hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-foreground))]"><Settings size={18} /><span>الإعدادات والمزامنة</span></button>
+      <button onClick={requestNotifications} className="mt-1 flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-semibold text-[hsl(var(--sidebar-foreground)/.64)] hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-foreground))]"><Bell size={18} /><span>{data.settings.notificationsEnabled ? 'التذكيرات مفعّلة' : 'فعّل التذكيرات'}</span></button>
+      <div className="mt-1"><ThemeToggle /></div>
+    </div>
+  </aside>;
 }
 
 function SettingsModal({ onClose, onNotify }: { onClose: () => void; onNotify: () => void }) {
-  const { data, updateSettings } = useRafiq();
+  const { data, updateSettings, restoreAllData, notify } = useRafiq();
   const [goal, setGoal] = useState(String(data.settings.dailyGoal));
   const [target, setTarget] = useState(String(data.settings.targetWeight));
+  const [syncCode, setSyncCode] = useState('');
+
   const save = () => { updateSettings({ dailyGoal: Number(goal) || 2800, targetWeight: Number(target) || 67 }); onClose(); };
-  return <div className="fixed inset-0 z-40 flex items-end justify-center bg-[hsl(var(--foreground)/.35)] p-0 backdrop-blur-sm md:items-center md:p-5" dir="rtl">
-    <div className="card-surface w-full max-w-md rounded-t-[28px] p-6 md:rounded-[28px]" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-      <div className="mb-6 flex items-center justify-between"><button onClick={onClose} className="rounded-full p-2 text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]" aria-label="إغلاق الإعدادات" data-testid="button-close-settings"><X size={19} /></button><h2 id="settings-title" className="display-font text-lg font-bold">إعدادات رفيق</h2></div>
+
+  const generateCode = () => {
+    const rawString = JSON.stringify(data);
+    const code = btoa(unescape(encodeURIComponent(rawString)));
+    navigator.clipboard.writeText(code);
+    notify('تم نسخ كود الحساب بنجاح! الصقه في جهازك الآخر.');
+  };
+
+  const restoreData = () => {
+    try {
+      const decodedString = decodeURIComponent(escape(atob(syncCode.trim())));
+      const decoded = JSON.parse(decodedString);
+      if (decoded && decoded.settings) {
+        restoreAllData(decoded);
+        onClose();
+      } else {
+        notify('الكود المدخل لا يحتوي على بيانات صالحة.');
+      }
+    } catch {
+      notify('تعذر قراءة الكود، تأكد من نسخه كاملاً دون نقصان.');
+    }
+  };
+
+  return <div className="fixed inset-0 z-50 flex items-end justify-center bg-[hsl(var(--foreground)/.4)] p-0 backdrop-blur-sm sm:items-center sm:p-5" dir="rtl">
+    <div className="card-surface w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-t-[28px] p-6 sm:rounded-[28px]">
+      <div className="mb-6 flex items-center justify-between"><button onClick={onClose} className="rounded-full p-2 text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]"><X size={19} /></button><h2 className="display-font text-lg font-bold">إعدادات رفيق</h2></div>
+
       <div className="space-y-4">
-        <label className="block text-sm font-semibold">هدف السعرات اليومي<input value={goal} onChange={(e) => setGoal(e.target.value)} type="number" className="mt-2 w-full rounded-xl border bg-[hsl(var(--background))] px-4 py-3 outline-none ring-[hsl(var(--primary))] focus:ring-2" dir="ltr" data-testid="input-daily-goal" /></label>
-        <label className="block text-sm font-semibold">الوزن المستهدف (كغ)<input value={target} onChange={(e) => setTarget(e.target.value)} type="number" step="0.1" className="mt-2 w-full rounded-xl border bg-[hsl(var(--background))] px-4 py-3 outline-none ring-[hsl(var(--primary))] focus:ring-2" dir="ltr" data-testid="input-target-weight" /></label>
-        <div className="space-y-2 rounded-xl border bg-[hsl(var(--background))] p-3">
-          <div className="flex items-center justify-between px-1 text-xs font-bold"><span>تذكيرات رفيق</span><span className="text-[10px] text-[hsl(var(--muted-foreground))]">{data.settings.notificationsEnabled ? 'مفعّلة' : 'غير مفعّلة'}</span></div>
-          <button onClick={onNotify} className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-sm font-semibold hover:bg-[hsl(var(--muted))]" data-testid="button-modal-notifications"><span className="flex items-center gap-2"><Moon size={15} className="text-[hsl(var(--primary))]" /> مشروب التاسعة مساءً</span><span className={`h-2.5 w-2.5 rounded-full ${data.settings.notificationsEnabled ? 'bg-[hsl(var(--primary))]' : 'bg-[hsl(var(--muted-foreground)/.35)]'}`} /></button>
-          <button onClick={onNotify} className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-sm font-semibold hover:bg-[hsl(var(--muted))]" data-testid="button-modal-weight-reminder"><span className="flex items-center gap-2"><Scale size={15} className="text-[hsl(var(--primary))]" /> وزن صباح السبت</span><span className={`h-2.5 w-2.5 rounded-full ${data.settings.notificationsEnabled ? 'bg-[hsl(var(--primary))]' : 'bg-[hsl(var(--muted-foreground)/.35)]'}`} /></button>
+        <label className="block text-sm font-semibold">هدف السعرات اليومي<input value={goal} onChange={(e) => setGoal(e.target.value)} type="number" className="mt-2 w-full rounded-xl border bg-[hsl(var(--background))] px-4 py-3 outline-none ring-[hsl(var(--primary))] focus:ring-2" dir="ltr" /></label>
+        <label className="block text-sm font-semibold">الوزن المستهدف (كغ)<input value={target} onChange={(e) => setTarget(e.target.value)} type="number" step="0.1" className="mt-2 w-full rounded-xl border bg-[hsl(var(--background))] px-4 py-3 outline-none ring-[hsl(var(--primary))] focus:ring-2" dir="ltr" /></label>
+
+        <div className="rounded-xl border bg-[hsl(var(--background))] p-4">
+          <div className="mb-2 flex items-center gap-2 text-sm font-bold"><Key size={16} className="text-[hsl(var(--primary))]" /> نقل الحساب بين الأجهزة</div>
+          <p className="mb-3 text-[11px] leading-5 text-[hsl(var(--muted-foreground))]">1. اضغط "نسخ كود حسابي" في جهازك الحالي.<br />2. افتح الرابط في الجهاز الثاني والصق الكود هنا واضغط "استرجاع".</p>
+          <button onClick={generateCode} className="mb-3 flex w-full items-center justify-center gap-2 rounded-lg bg-[hsl(var(--secondary))] py-2.5 text-xs font-bold text-[hsl(var(--primary))]"><RefreshCw size={14} /> نسخ كود حسابي الحالي</button>
+          <div className="flex gap-2">
+            <input value={syncCode} onChange={(e) => setSyncCode(e.target.value)} placeholder="الصق الكود هنا..." className="min-w-0 flex-1 rounded-lg border bg-[hsl(var(--card))] px-3 py-2 text-xs outline-none focus:ring-1" dir="ltr" />
+            <button onClick={restoreData} disabled={!syncCode.trim()} className="rounded-lg bg-[hsl(var(--primary))] px-4 py-2 text-xs font-bold text-[hsl(var(--primary-foreground))] disabled:opacity-50">استرجاع</button>
+          </div>
         </div>
       </div>
-      <button onClick={save} className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl bg-[hsl(var(--primary))] py-3.5 text-sm font-bold text-[hsl(var(--primary-foreground))] hover:opacity-90" data-testid="button-save-settings"><Check size={17} /> حفظ التغييرات</button>
+
+      <button onClick={save} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-[hsl(var(--primary))] py-3.5 text-sm font-bold text-[hsl(var(--primary-foreground))] hover:opacity-90"><Check size={17} /> حفظ التغييرات</button>
     </div>
   </div>;
 }
 
 function MobileNav() {
   const [location] = useLocation();
-  return <nav className="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-4 border-t bg-[hsl(var(--card)/.96)] px-2 py-2 backdrop-blur md:hidden" dir="rtl">
-    {navItems.map(({ href, label, icon: Icon }) => <Link href={href} key={href} className={`flex flex-col items-center gap-1 rounded-xl py-2 text-[10px] font-semibold ${location === href ? 'text-[hsl(var(--primary))]' : 'text-[hsl(var(--muted-foreground))]'}`} data-testid={`link-mobile-${href === '/' ? 'home' : href.slice(1)}`}><Icon size={19} /><span>{label.replace('متابعة العادات', 'العادات').replace('نظرتي اليوم', 'اليوم')}</span></Link>)}
+  return <nav className="fixed bottom-4 left-4 right-4 z-30 flex items-center justify-around rounded-2xl border bg-[hsl(var(--card)/.92)] px-3 py-2.5 shadow-2xl backdrop-blur-md md:hidden" dir="rtl">
+    {navItems.map(({ href, label, icon: Icon }) => <Link href={href} key={href} className={`flex flex-col items-center gap-1 rounded-xl px-3 py-1 text-[11px] font-semibold transition-colors ${location === href ? 'text-[hsl(var(--primary))] bg-[hsl(var(--secondary)/.6)]' : 'text-[hsl(var(--muted-foreground))]'}`}><Icon size={19} /><span>{label}</span></Link>)}
   </nav>;
 }
 
 function AppLayout({ children }: { children: ReactNode }) {
-  return <div className="app-shell flex" dir="rtl"><Sidebar /><div className="fixed left-4 top-4 z-20 md:hidden"><ThemeToggle mobile /></div><main className="min-w-0 flex-1 pb-20 md:pb-0">{children}</main><MobileNav /></div>;
+  const { updateSettings, notify } = useRafiq();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const requestNotifications = () => {
+    if (!('Notification' in window)) { notify('التنبيهات غير متاحة في هذا المتصفح'); return; }
+    Notification.requestPermission().then((permission) => {
+      const enabled = permission === 'granted';
+      updateSettings({ notificationsEnabled: enabled });
+      notify(enabled ? 'تم تفعيل تذكيرات رفيق' : 'يمكنك تفعيلها لاحقاً من إعدادات المتصفح');
+    });
+  };
+
+  return <div className="app-shell flex min-h-screen" dir="rtl">
+    <Sidebar onOpenSettings={() => setSettingsOpen(true)} />
+
+    <div className="fixed left-4 top-4 z-20 flex gap-2 md:hidden">
+      <ThemeToggle mobile />
+    </div>
+    <div className="fixed right-4 top-4 z-20 md:hidden">
+      <button onClick={() => setSettingsOpen(true)} className="flex h-11 w-11 items-center justify-center rounded-full border bg-[hsl(var(--card)/.94)] text-[hsl(var(--foreground))] shadow-md backdrop-blur transition-colors hover:bg-[hsl(var(--muted))]">
+        <Settings size={19} />
+      </button>
+    </div>
+
+    <main className="min-w-0 flex-1 pb-28 pt-16 md:pb-0 md:pt-0">{children}</main>
+    <MobileNav />
+
+    {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} onNotify={requestNotifications} />}
+  </div>;
 }
 
 function PageHeader({ eyebrow, title, description, action }: { eyebrow?: string; title: string; description?: string; action?: ReactNode }) {
-  return <header className="mb-7 flex items-start justify-between gap-4" dir="rtl"><div><div className="mb-2 text-xs font-bold tracking-[.13em] text-[hsl(var(--primary))]">{eyebrow}</div><h1 className="display-font text-[clamp(1.65rem,3vw,2.2rem)] font-bold leading-tight">{title}</h1>{description && <p className="mt-2 max-w-xl text-sm leading-7 text-[hsl(var(--muted-foreground))]">{description}</p>}</div>{action}</header>;
+  return <header className="mb-7 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4" dir="rtl"><div><div className="mb-2 text-xs font-bold tracking-[.13em] text-[hsl(var(--primary))]">{eyebrow}</div><h1 className="display-font text-[clamp(1.5rem,3vw,2.2rem)] font-bold leading-tight">{title}</h1>{description && <p className="mt-2 max-w-xl text-sm leading-7 text-[hsl(var(--muted-foreground))]">{description}</p>}</div>{action}</header>;
 }
 
 function ArabicNumber({ value, suffix }: { value: number | string; suffix?: string }) {
@@ -225,7 +292,7 @@ function ArabicNumber({ value, suffix }: { value: number | string; suffix?: stri
 
 function ProgressRing({ value, max }: { value: number; max: number }) {
   const percentage = Math.min(100, Math.round(value / max * 100));
-  return <div className="relative h-36 w-36 shrink-0" aria-label={`أنجزت ${percentage} بالمئة من هدف السعرات`} role="progressbar" aria-valuenow={percentage} aria-valuemin={0} aria-valuemax={100}>
+  return <div className="relative h-36 w-36 shrink-0" role="progressbar" aria-valuenow={percentage} aria-valuemin={0} aria-valuemax={100}>
     <svg viewBox="0 0 120 120" className="-rotate-90"><circle cx="60" cy="60" r="49" fill="none" stroke="hsl(var(--muted))" strokeWidth="10" /><circle cx="60" cy="60" r="49" fill="none" stroke="hsl(var(--accent))" strokeWidth="10" strokeLinecap="round" strokeDasharray={`${percentage * 3.08} 308`} /></svg>
     <div className="absolute inset-0 flex flex-col items-center justify-center"><span className="display-font text-2xl font-bold"><ArabicNumber value={value} /></span><span className="text-[10px] text-[hsl(var(--muted-foreground))]">من {max.toLocaleString('ar-EG')}</span></div>
   </div>;
@@ -234,7 +301,7 @@ function ProgressRing({ value, max }: { value: number; max: number }) {
 function WeightChart({ weights, target }: { weights: WeightEntry[]; target: number }) {
   const points = weights.slice(-7);
   if (!points.length) {
-    return <div className="flex h-52 flex-col items-center justify-center rounded-2xl border border-dashed bg-[hsl(var(--muted)/.35)] px-6 text-center" dir="rtl">
+    return <div className="flex h-52 flex-col items-center justify-center rounded-2xl border border-dashed bg-[hsl(var(--muted)/.35)] px-4 text-center" dir="rtl">
       <Scale size={24} className="mb-3 text-[hsl(var(--primary))]" />
       <p className="text-sm font-bold">مسارك يبدأ من أول قياس</p>
       <p className="mt-1 max-w-xs text-xs leading-6 text-[hsl(var(--muted-foreground))]">سجّل وزنك اليوم حتى يظهر تقدمك نحو {target} كغ هنا.</p>
@@ -267,7 +334,7 @@ function FeedbackCard() {
 }
 
 function ViewToggle({ period, setPeriod }: { period: Period; setPeriod: (period: Period) => void }) {
-  return <div className="flex rounded-xl border bg-[hsl(var(--card))] p-1" dir="rtl">{(['يومي', 'أسبوعي', 'شهري'] as Period[]).map((item) => <button key={item} onClick={() => setPeriod(item)} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${period === item ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]' : 'text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]'}`} data-testid={`button-period-${item}`}>{item}</button>)}</div>;
+  return <div className="flex rounded-xl border bg-[hsl(var(--card))] p-1" dir="rtl">{(['يومي', 'أسبوعي', 'شهري'] as Period[]).map((item) => <button key={item} onClick={() => setPeriod(item)} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${period === item ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]' : 'text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]'}`}>{item}</button>)}</div>;
 }
 
 function HomePage() {
@@ -279,26 +346,26 @@ function HomePage() {
   const habitsDone = Object.values(todayLog.habits).filter(Boolean).length;
   const visibleWeights = period === 'يومي' ? data.weights.slice(-1) : period === 'شهري' ? data.weights : data.weights.slice(-7);
   const saveWeight = () => { addWeight(Number(weight)); setWeight(''); };
-  return <div className="mx-auto max-w-[1280px] p-5 md:p-9 lg:p-12" dir="rtl">
-    <PageHeader eyebrow={todayLabel()} title="أهلاً بك في رفيقك" description="خطوة صغيرة اليوم، جسم أقوى غداً. خذ نظرة سريعة على إيقاعك ثم اختر ما يناسبك." action={<div className="hidden items-center gap-2 rounded-full border bg-[hsl(var(--card))] px-3 py-2 text-xs font-semibold text-[hsl(var(--muted-foreground))] md:flex"><Sun size={15} className="text-[hsl(var(--accent))]" /> يوم هادئ للنمو</div>} />
+  return <div className="mx-auto max-w-[1280px] p-4 sm:p-6 md:p-9 lg:p-12" dir="rtl">
+    <PageHeader eyebrow={todayLabel()} title="أهلاً بك في رفيقك" description="خطوة صغيرة اليوم، جسم أقوى غداً. خذ نظرة سريعة على إيقاعك ثم اختر ما يناسبك." />
     <div className="grid gap-5 lg:grid-cols-[1.35fr_.65fr]">
       <FeedbackCard />
-      <section className="card-surface flex items-center justify-between gap-3 rounded-[24px] p-5" aria-label="ملخص اليوم"><div><div className="text-xs font-semibold text-[hsl(var(--muted-foreground))]">إنجاز اليوم</div><div className="mt-2 display-font text-3xl font-bold"><ArabicNumber value={habitsDone} /><span className="mr-1 text-base font-medium text-[hsl(var(--muted-foreground))]">/ ٤ عادات</span></div><p className="mt-2 text-xs text-[hsl(var(--muted-foreground))]">{habitsDone === 4 ? 'يوم مكتمل، أحسنت.' : 'ما زال أمامك وقت لطيف.'}</p></div><div className="flex h-16 w-16 items-center justify-center rounded-full border-[6px] border-[hsl(var(--secondary))] text-[hsl(var(--primary))]"><Check size={26} /></div></section>
+      <section className="card-surface flex items-center justify-between gap-3 rounded-[24px] p-5"><div><div className="text-xs font-semibold text-[hsl(var(--muted-foreground))]">إنجاز اليوم</div><div className="mt-2 display-font text-3xl font-bold"><ArabicNumber value={habitsDone} /><span className="mr-1 text-base font-medium text-[hsl(var(--muted-foreground))]">/ ٤ عادات</span></div><p className="mt-2 text-xs text-[hsl(var(--muted-foreground))]">{habitsDone === 4 ? 'يوم مكتمل، أحسنت.' : 'ما زال أمامك وقت لطيف.'}</p></div><div className="flex h-16 w-16 items-center justify-center rounded-full border-[6px] border-[hsl(var(--secondary))] text-[hsl(var(--primary))]"><Check size={26} /></div></section>
     </div>
     <div className="mt-5 grid gap-5 xl:grid-cols-[1.35fr_.65fr]">
-       <section className="card-surface rounded-[24px] p-5 md:p-7" aria-labelledby="progress-title">
-        <div className="mb-8 flex items-start justify-between gap-4"><div><div className="flex items-center gap-2"><TrendingUp size={18} className="text-[hsl(var(--primary))]" /><h2 id="progress-title" className="display-font text-lg font-bold">مسار الزيادة</h2></div><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{period === 'يومي' ? 'قراءة اليوم' : period === 'شهري' ? 'نظرة على الشهر' : 'آخر سبعة أيام'} · من {data.settings.startingWeight} كغ إلى {data.settings.targetWeight} كغ</p></div><ViewToggle period={period} setPeriod={setPeriod} /></div>
+       <section className="card-surface rounded-[24px] p-5 md:p-7">
+        <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"><div><div className="flex items-center gap-2"><TrendingUp size={18} className="text-[hsl(var(--primary))]" /><h2 className="display-font text-lg font-bold">مسار الزيادة</h2></div><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{period === 'يومي' ? 'قراءة اليوم' : period === 'شهري' ? 'نظرة على الشهر' : 'آخر سبعة أيام'} · من {data.settings.startingWeight} كغ إلى {data.settings.targetWeight} كغ</p></div><ViewToggle period={period} setPeriod={setPeriod} /></div>
          <div className="relative"><WeightChart weights={visibleWeights} target={data.settings.targetWeight} /><div className="mt-8 flex items-center justify-between border-t pt-4 text-xs"><span className="text-[hsl(var(--muted-foreground))]">الوزن الحالي <strong className="mr-1 text-base text-[hsl(var(--foreground))]">{latestWeight === null ? '—' : <ArabicNumber value={latestWeight.toFixed(1)} suffix="كغ" />}</strong></span><span className="rounded-full bg-[hsl(var(--secondary))] px-3 py-1.5 font-bold text-[hsl(var(--primary))]">{latestWeight === null ? 'بانتظار أول قياس' : `+${gained.toFixed(1)} كغ منذ البداية`}</span></div></div>
       </section>
-      <section className="card-surface rounded-[24px] p-5 md:p-7" aria-labelledby="weight-log-title">
-        <div className="mb-5 flex items-center justify-between"><div><h2 id="weight-log-title" className="display-font text-lg font-bold">قياس هذا الصباح</h2><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">مرة واحدة في الأسبوع تكفي</p></div><Scale size={22} className="text-[hsl(var(--accent))]" /></div>
-        <div className="flex items-center gap-2"><input value={weight} onChange={(e) => setWeight(e.target.value)} type="number" step=".1" placeholder={latestWeight === null ? 'مثال: ٦٠' : latestWeight.toFixed(1)} className="w-full rounded-xl border bg-[hsl(var(--background))] px-4 py-3 text-lg font-bold outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]" dir="ltr" aria-label="الوزن بالكيلوغرام" data-testid="input-today-weight" /><span className="text-sm text-[hsl(var(--muted-foreground))]">كغ</span></div>
-        <button onClick={saveWeight} disabled={!weight} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[hsl(var(--secondary))] py-3 text-sm font-bold text-[hsl(var(--primary))] transition-opacity disabled:cursor-not-allowed disabled:opacity-40 hover:opacity-85" data-testid="button-save-weight"><Plus size={17} /> حفظ القياس</button>
+      <section className="card-surface rounded-[24px] p-5 md:p-7">
+        <div className="mb-5 flex items-center justify-between"><div><h2 className="display-font text-lg font-bold">قياس هذا الصباح</h2><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">مرة واحدة في الأسبوع تكفي</p></div><Scale size={22} className="text-[hsl(var(--accent))]" /></div>
+        <div className="flex items-center gap-2"><input value={weight} onChange={(e) => setWeight(e.target.value)} type="number" step=".1" placeholder={latestWeight === null ? 'مثال: ٦٠' : latestWeight.toFixed(1)} className="w-full rounded-xl border bg-[hsl(var(--background))] px-4 py-3 text-lg font-bold outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]" dir="ltr" /><span className="text-sm text-[hsl(var(--muted-foreground))]">كغ</span></div>
+        <button onClick={saveWeight} disabled={!weight} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[hsl(var(--secondary))] py-3 text-sm font-bold text-[hsl(var(--primary))] transition-opacity disabled:cursor-not-allowed disabled:opacity-40 hover:opacity-85"><Plus size={17} /> حفظ القياس</button>
         <div className="mt-5 flex gap-3 rounded-xl bg-[hsl(var(--muted)/.6)] p-3 text-xs leading-6 text-[hsl(var(--muted-foreground))]"><Info size={16} className="mt-1 shrink-0 text-[hsl(var(--primary))]" /> اختَر نفس الوقت والظروف تقريباً لتحصل على قراءة أصدق.</div>
       </section>
     </div>
     <div className="mt-5 grid gap-5 md:grid-cols-2">
-       <section className="card-surface rounded-[24px] p-5" aria-label="هدف السعرات"><div className="mb-3 flex items-center justify-between"><div><h2 className="display-font text-lg font-bold">وقود يومك</h2><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">سعرات مسجلة اليوم</p></div><Flame size={21} className="text-[hsl(var(--accent))]" /></div><div className="flex items-center gap-5"><ProgressRing value={todayLog.calories} max={data.settings.dailyGoal} /><div><div className="text-2xl font-bold"><ArabicNumber value={todayLog.calories} suffix="سعرة" /></div><p className="mt-2 text-xs leading-6 text-[hsl(var(--muted-foreground))]">تبقّى لك <strong className="text-[hsl(var(--foreground))]"><ArabicNumber value={Math.max(0, data.settings.dailyGoal - todayLog.calories)} /></strong> سعرة للوصول لهدفك.</p><Link href="/tracker" className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-[hsl(var(--primary))]" data-testid="link-go-tracker">أكمل يومك <ArrowLeft size={14} /></Link></div></div></section>
+       <section className="card-surface rounded-[24px] p-5"><div className="mb-3 flex items-center justify-between"><div><h2 className="display-font text-lg font-bold">وقود يومك</h2><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">سعرات مسجلة اليوم</p></div><Flame size={21} className="text-[hsl(var(--accent))]" /></div><div className="flex flex-col sm:flex-row items-center gap-5"><ProgressRing value={todayLog.calories} max={data.settings.dailyGoal} /><div><div className="text-2xl font-bold"><ArabicNumber value={todayLog.calories} suffix="سعرة" /></div><p className="mt-2 text-xs leading-6 text-[hsl(var(--muted-foreground))]">تبقّى لك <strong className="text-[hsl(var(--foreground))]"><ArabicNumber value={Math.max(0, data.settings.dailyGoal - todayLog.calories)} /></strong> سعرة للوصول لهدفك.</p><Link href="/tracker" className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-[hsl(var(--primary))]">أكمل يومك <ArrowLeft size={14} /></Link></div></div></section>
        <section className="card-surface flex items-center justify-between gap-4 rounded-[24px] p-5"><div><div className="mb-2 flex items-center gap-2 text-xs font-bold text-[hsl(var(--primary))]"><Goal size={15} /> وجهتك القادمة</div><h2 className="display-font text-xl font-bold"><ArabicNumber value={data.settings.targetWeight.toFixed(1)} suffix="كغ" /></h2><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{latestWeight === null ? 'سجّل أول قياس لتعرف المسافة المتبقية.' : `باقي ${Math.max(0, data.settings.targetWeight - latestWeight).toFixed(1)} كغ بإيقاعك الخاص.`}</p></div><div className="relative flex h-24 w-24 items-center justify-center rounded-full border-4 border-[hsl(var(--secondary))]"><div className="absolute inset-1 rounded-full border-4 border-t-[hsl(var(--accent))] border-l-transparent border-b-transparent border-r-transparent rotate-45" /><Target size={27} className="text-[hsl(var(--primary))]" /></div></section>
     </div>
   </div>;
@@ -312,108 +379,128 @@ const habits: { key: HabitKey; title: string; description: string; icon: typeof 
 ];
 
 function TrackerPage() {
-  const { data, todayLog, toggleHabit, addCalories, notify } = useRafiq();
+  const { data, todayLog, toggleHabit, addCalories } = useRafiq();
   const [calories, setCalories] = useState('');
   const completed = Object.values(todayLog.habits).filter(Boolean).length;
   const addManual = () => { addCalories(Number(calories), 'السعرات اليدوية'); setCalories(''); };
-  const toggleNotifications = () => {
-    if (!('Notification' in window)) { notify('التنبيهات غير متاحة هنا'); return; }
-    Notification.requestPermission().then((permission) => { notify(permission === 'granted' ? 'سيذكّرك رفيقك عند التاسعة مساءً' : 'لم يتم تفعيل التنبيهات'); });
-  };
-  return <div className="mx-auto max-w-[1080px] p-5 md:p-9 lg:p-12" dir="rtl">
+  return <div className="mx-auto max-w-[1080px] p-4 sm:p-6 md:p-9 lg:p-12" dir="rtl">
     <PageHeader eyebrow="روتين بسيط، أثر كبير" title="متابعة يومك" description="لا نبحث عن الكمال. أربع عادات صغيرة تعطي جسمك إشارة ثابتة بأنه في أمان للنمو." />
      <section className="mb-5 overflow-hidden rounded-[24px] bg-[hsl(var(--primary))] p-5 text-[hsl(var(--primary-foreground))] md:p-7"><div className="flex flex-wrap items-end justify-between gap-5"><div><div className="flex items-center gap-2 text-xs font-semibold text-[hsl(var(--primary-foreground)/.68)]"><Gauge size={16} /> {todayLabel()}</div><h2 className="mt-2 display-font text-2xl font-bold">إيقاعك اليومي</h2><p className="mt-1 text-sm text-[hsl(var(--primary-foreground)/.7)]">أنجزت {completed} من ٤ عادات حتى الآن.</p></div><div className="min-w-[190px]"><div className="mb-2 flex justify-between text-xs"><span>التقدم</span><span dir="ltr">{completed * 25}%</span></div><div className="h-2 rounded-full bg-[hsl(var(--primary-foreground)/.16)]"><div className="h-full rounded-full bg-[hsl(var(--accent))] transition-all duration-500" style={{ width: `${completed * 25}%` }} /></div></div></div></section>
     <div className="grid gap-5 lg:grid-cols-[1.2fr_.8fr]">
-      <section className="card-surface rounded-[24px] p-5 md:p-7"><div className="mb-5 flex items-center justify-between"><div><h2 className="display-font text-lg font-bold">عادات رفيق الأربعة</h2><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">اضغط على العادة بعد إنجازها</p></div><span className="rounded-full bg-[hsl(var(--secondary))] px-3 py-1 text-xs font-bold text-[hsl(var(--primary))]">{completed === 4 ? 'يوم مكتمل' : `${completed}/٤`}</span></div><div className="grid gap-3 sm:grid-cols-2">{habits.map(({ key, title, description, icon: Icon, color }) => { const checked = todayLog.habits[key]; return <button key={key} onClick={() => toggleHabit(key)} className={`group flex items-center gap-3 rounded-2xl border p-4 text-right transition-all ${checked ? 'border-[hsl(var(--primary)/.28)] bg-[hsl(var(--secondary)/.55)]' : 'bg-[hsl(var(--background)/.5)] hover:border-[hsl(var(--primary)/.35)]'}`} data-testid={`button-habit-${key}`} aria-pressed={checked}><span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] ${color} ${checked ? 'check-pop' : ''}`}>{checked ? <Check size={20} strokeWidth={2.5} /> : <Icon size={20} />}</span><span className="min-w-0"><strong className={`block text-sm ${checked ? 'text-[hsl(var(--primary))]' : ''}`}>{title}</strong><small className="mt-1 block text-[11px] leading-5 text-[hsl(var(--muted-foreground))]">{description}</small></span><span className={`mr-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${checked ? 'border-[hsl(var(--primary))] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]' : 'border-[hsl(var(--border))] text-transparent'}`}><Check size={12} /></span></button>; })}</div></section>
-      <section className="card-surface rounded-[24px] p-5 md:p-7"><div className="mb-5 flex items-center justify-between"><div><h2 className="display-font text-lg font-bold">أضف ما أكلت</h2><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">رقم تقريبي أفضل من عدم التسجيل</p></div><Plus size={21} className="text-[hsl(var(--accent))]" /></div><div className="rounded-2xl bg-[hsl(var(--muted)/.65)] p-4"><label className="text-xs font-bold text-[hsl(var(--muted-foreground))]">سعرات يدوية<input value={calories} onChange={(e) => setCalories(e.target.value)} type="number" min="1" placeholder="مثال: 450" className="mt-2 w-full rounded-xl border bg-[hsl(var(--card))] px-3 py-3 text-base font-semibold outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]" dir="ltr" data-testid="input-manual-calories" /></label><button onClick={addManual} disabled={!calories} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[hsl(var(--primary))] py-3 text-sm font-bold text-[hsl(var(--primary-foreground))] disabled:opacity-40" data-testid="button-add-manual-calories"><Plus size={16} /> إضافة إلى اليوم</button></div><div className="mt-5 flex items-center gap-3 border-t pt-4"><button onClick={toggleNotifications} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[hsl(var(--secondary))] text-[hsl(var(--primary))]" aria-label="تفعيل تذكير المساء" data-testid="button-enable-reminder"><Bell size={18} /></button><p className="text-xs leading-5 text-[hsl(var(--muted-foreground))]">تذكير لطيف عند ٩ مساءً لمشروبك عالي السعرات.</p></div></section>
+      <section className="card-surface rounded-[24px] p-5 md:p-7"><div className="mb-5 flex items-center justify-between"><div><h2 className="display-font text-lg font-bold">عادات رفيق الأربعة</h2><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">اضغط على العادة بعد إنجازها</p></div><span className="rounded-full bg-[hsl(var(--secondary))] px-3 py-1 text-xs font-bold text-[hsl(var(--primary))]">{completed === 4 ? 'يوم مكتمل' : `${completed}/٤`}</span></div><div className="grid gap-3 sm:grid-cols-2">{habits.map(({ key, title, description, icon: Icon, color }) => { const checked = todayLog.habits[key]; return <button key={key} onClick={() => toggleHabit(key)} className={`group flex items-center gap-3 rounded-2xl border p-4 text-right transition-all ${checked ? 'border-[hsl(var(--primary)/.28)] bg-[hsl(var(--secondary)/.55)]' : 'bg-[hsl(var(--background)/.5)] hover:border-[hsl(var(--primary)/.35)]'}`}><span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] ${color} ${checked ? 'check-pop' : ''}`}>{checked ? <Check size={20} strokeWidth={2.5} /> : <Icon size={20} />}</span><span className="min-w-0"><strong className={`block text-sm ${checked ? 'text-[hsl(var(--primary))]' : ''}`}>{title}</strong><small className="mt-1 block text-[11px] leading-5 text-[hsl(var(--muted-foreground))]">{description}</small></span><span className={`mr-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${checked ? 'border-[hsl(var(--primary))] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]' : 'border-[hsl(var(--border))] text-transparent'}`}><Check size={12} /></span></button>; })}</div></section>
+      <section className="card-surface rounded-[24px] p-5 md:p-7"><div className="mb-5 flex items-center justify-between"><div><h2 className="display-font text-lg font-bold">أضف ما أكلت</h2><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">رقم تقريبي أفضل من عدم التسجيل</p></div><Plus size={21} className="text-[hsl(var(--accent))]" /></div><div className="rounded-2xl bg-[hsl(var(--muted)/.65)] p-4"><label className="text-xs font-bold text-[hsl(var(--muted-foreground))]">سعرات يدوية<input value={calories} onChange={(e) => setCalories(e.target.value)} type="number" min="1" placeholder="مثال: 450" className="mt-2 w-full rounded-xl border bg-[hsl(var(--card))] px-3 py-3 text-base font-semibold outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]" dir="ltr" /></label><button onClick={addManual} disabled={!calories} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[hsl(var(--primary))] py-3 text-sm font-bold text-[hsl(var(--primary-foreground))] disabled:opacity-40"><Plus size={16} /> إضافة إلى اليوم</button></div><div className="mt-5 flex items-center gap-3 border-t pt-4"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[hsl(var(--secondary))] text-[hsl(var(--primary))]"><Bell size={18} /></div><p className="text-xs leading-5 text-[hsl(var(--muted-foreground))]">لا تنسَ تفعيل التذكيرات من الإعدادات لضمان التزامك.</p></div></section>
     </div>
-    <div className="mt-5 rounded-[24px] border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--card)/.5)] p-5 text-center"><Moon size={20} className="mx-auto mb-2 text-[hsl(var(--primary))]" /><p className="text-sm font-semibold">الاستمرارية أهم من يوم مثالي</p><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">كل علامة هنا هي وعد صغير قطعته لنفسك.</p></div>
   </div>;
 }
 
 type Food = { label: string; calories: number; portion: string; detail: string; icon: typeof Utensils };
-const foodKnowledge: Food[] = [
-  { label: 'شوفان بالحليب', calories: 420, portion: 'كوب شوفان + كوب حليب', detail: 'فطور دافئ وسهل الرفع بالسعرات', icon: Wheat },
-  { label: 'فول سوداني', calories: 170, portion: 'حفنة صغيرة (٣٠غ)', detail: 'يناسب الجيب بين الوجبات', icon: ShoppingBasket },
-  { label: 'طحينة', calories: 90, portion: 'ملعقة كبيرة', detail: 'أضفها للفول أو الساندويتش', icon: Droplets },
-  { label: 'زبادي كامل الدسم', calories: 150, portion: 'علبة ١٧٠غ', detail: 'مع العسل أو الشوفان', icon: Utensils },
-  { label: 'زيت الزيتون', calories: 120, portion: 'ملعقة كبيرة', detail: 'دفعة صغيرة لا تغيّر حجم الطبق', icon: Leaf },
-  { label: 'تمر', calories: 140, portion: '٤ حبات', detail: 'حلاوة طبيعية مع مكسرات', icon: Sun },
-];
 
 function ScannerPage() {
-  const { addCalories, recordScanned, notify } = useRafiq();
+  const { addCalories, recordScanned } = useRafiq();
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
-  const [imageLoading, setImageLoading] = useState(false);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [imageName, setImageName] = useState('');
-  const [imageCalories, setImageCalories] = useState('');
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [result, setResult] = useState<Food | null>(null);
-  const matches = useMemo(() => query.trim() ? foodKnowledge.filter((food) => food.label.includes(query.trim())) : [], [query]);
+
   const estimate = () => {
     if (!query.trim()) return;
     setLoading(true); setResult(null);
-    window.setTimeout(() => { const food = matches[0] ?? { label: query.trim(), calories: 300, portion: 'حصة متوسطة', detail: 'تقدير أولي قابل للتعديل', icon: Utensils }; setResult(food); recordScanned({ query: query.trim(), label: food.label, calories: food.calories }); setLoading(false); }, 550);
-  };
-  const openImagePicker = () => fileInputRef.current?.click();
-  const handleImageChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      notify('اختر ملف صورة صالحاً');
-      return;
-    }
-    if (file.size > 8 * 1024 * 1024) {
-      notify('حجم الصورة يجب أن يكون أقل من ٨ ميغابايت');
-      return;
-    }
-    setImageLoading(true);
-    setResult(null);
-    const reader = new FileReader();
-    reader.onload = () => {
-      setImagePreview(String(reader.result));
-      setImageName(file.name);
-      setImageCalories('');
-      setImageLoading(false);
-      notify('تم تحميل الصورة، أدخل تقدير السعرات');
+
+    const generateSmartEstimate = (text: string) => {
+      let estimatedCalories = 0;
+      let details: string[] = [];
+      const lowerText = text.toLowerCase();
+
+      const normalizedText = lowerText.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
+      const weightMatch = normalizedText.match(/(\d+)/);
+      const userNumber = weightMatch ? parseInt(weightMatch[1], 10) : null;
+
+      const foodDatabase = [
+        { keywords: ['تمر'], isPiece: true, calPerPiece: 35, defaultNum: 4, unitName: 'حبات' },
+        { keywords: ['بيض'], isPiece: true, calPerPiece: 70, defaultNum: 2, unitName: 'بيضة' },
+        { keywords: ['جبن', 'جبنة'], calPer100g: 250, defaultNum: 50, unitName: 'غ (قطعة متوسطة)' },
+        { keywords: ['لبن', 'زبادي'], calPer100g: 61, defaultNum: 170, unitName: 'غ (علبة)' },
+        { keywords: ['حليب'], calPer100g: 61, defaultNum: 250, unitName: 'غ (كوب كبير)' },
+        { keywords: ['شوفان'], calPer100g: 389, defaultNum: 50, unitName: 'غ (نصف كوب)' },
+        { keywords: ['رز', 'أرز'], calPer100g: 130, defaultNum: 150, unitName: 'غ (صحن)' },
+        { keywords: ['بطاطا'], calPer100g: 87, defaultNum: 150, unitName: 'غ (حبة متوسطة)' },
+        { keywords: ['زيت', 'سمن', 'زبدة'], calPer100g: 884, defaultNum: 15, unitName: 'غ (ملعقة كبيرة)' },
+        { keywords: ['طحينة', 'طحينيه'], calPer100g: 595, defaultNum: 30, unitName: 'غ (ملعقتين)' },
+        { keywords: ['فول سوداني', 'زبدة فول'], calPer100g: 567, defaultNum: 30, unitName: 'غ (حفنة)' },
+        { keywords: ['فول', 'مدمس'], calPer100g: 110, defaultNum: 150, unitName: 'غ (صحن)' },
+        { keywords: ['حمص', 'مسبحة'], calPer100g: 166, defaultNum: 100, unitName: 'غ (نصف صحن)' },
+        { keywords: ['لحم', 'دجاج', 'فروج', 'شاورما'], calPer100g: 250, defaultNum: 100, unitName: 'غ (قطعة)' },
+        { keywords: ['خبز', 'صمون', 'رغيف'], isPiece: true, calPerPiece: 260, defaultNum: 1, unitName: 'رغيف' },
+        { keywords: ['معكرونة', 'مكرونة'], calPer100g: 130, defaultNum: 150, unitName: 'غ (صحن)' },
+        { keywords: ['موز'], isPiece: true, calPerPiece: 90, defaultNum: 1, unitName: 'حبة' },
+      ];
+
+      foodDatabase.forEach(item => {
+        if (item.keywords.some(kw => normalizedText.includes(kw))) {
+          const numToUse = userNumber !== null ? userNumber : item.defaultNum;
+          let itemCalories = 0;
+
+          if (item.isPiece) { 
+            itemCalories = item.calPerPiece! * numToUse;
+            if (userNumber !== null) details.push(`${item.keywords[0]} (${numToUse} ${item.unitName} = ${itemCalories} سعرة)`);
+            else details.push(`${item.keywords[0]} (الافتراضي: ${numToUse} ${item.unitName} = ${itemCalories} سعرة)`);
+          } 
+          else { 
+            itemCalories = Math.round((item.calPer100g! / 100) * numToUse);
+            if (userNumber !== null) details.push(`${item.keywords[0]} (${numToUse}غ = ${itemCalories} سعرة)`);
+            else details.push(`${item.keywords[0]} (الافتراضي: ${numToUse}${item.unitName} = ${itemCalories} سعرة)`);
+          }
+          estimatedCalories += itemCalories;
+        }
+      });
+
+      if (estimatedCalories === 0) {
+        const numToUse = userNumber !== null ? userNumber : 150;
+        estimatedCalories = Math.round((200 / 100) * numToUse);
+        details.push(`صنف غير مسجل (${userNumber !== null ? numToUse+'غ' : 'وجبة تقريبية'} = ${estimatedCalories} سعرة)`);
+      }
+
+      return { calories: estimatedCalories, detail: details.join(' + ') };
     };
-    reader.onerror = () => {
-      setImageLoading(false);
-      notify('تعذر قراءة الصورة، جرّب صورة أخرى');
-    };
-    reader.readAsDataURL(file);
+
+    window.setTimeout(() => { 
+      const smartData = generateSmartEstimate(query.trim());
+      const food = { label: query.trim(), calories: smartData.calories, portion: 'تحليل ذكي', detail: smartData.detail, icon: Utensils };
+      setResult(food); 
+      recordScanned({ query: query.trim(), label: food.label, calories: food.calories }); 
+      setLoading(false); 
+    }, 450);
   };
-  const clearImage = () => {
-    setImagePreview(null);
-    setImageName('');
-    setImageCalories('');
-    setResult(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-  const estimateImage = () => {
-    const calories = Number(imageCalories);
-    if (!imagePreview || !Number.isFinite(calories) || calories <= 0) {
-      notify('أدخل سعرات تقريبية للصورة أولاً');
-      return;
-    }
-    const food = { label: imageName ? `وجبة من ${imageName}` : 'وجبة من الصورة', calories: Math.round(calories), portion: 'تقدير يدوي', detail: 'الصورة للمعاينة فقط ولا يتم حفظ ملفها', icon: Utensils };
-    setResult(food);
-    recordScanned({ query: `صورة:${imageName}`, label: food.label, calories: food.calories });
-    notify('تم تجهيز تقدير وجبتك');
-  };
-  return <div className="mx-auto max-w-[1080px] p-5 md:p-9 lg:p-12" dir="rtl">
-    <PageHeader eyebrow="خمن، سجّل، وواصل" title="قدّر وجبتك" description="اكتب اسم الطعام كما تقوله في البيت، أو ارفع صورة لطبقك. الرقم تقريبي، والغرض أن يساعدك لا أن يقيّدك." />
+
+  return <div className="mx-auto max-w-[1080px] p-4 sm:p-6 md:p-9 lg:p-12" dir="rtl">
+    <PageHeader eyebrow="سجل طعامك ببساطة" title="قدّر وجبتك" description="اكتب اسم طعامك أو عدده (مثل: 3 تمر، بيضتين، 100غ بطاطا) ليقوم رفيق بإضافتها ليومك." />
     <div className="grid gap-5 lg:grid-cols-[1.15fr_.85fr]">
-      <section className="card-surface rounded-[24px] p-5 md:p-7"><div className="mb-6 flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[hsl(var(--secondary))] text-[hsl(var(--primary))]"><Utensils size={19} /></span><div><h2 className="display-font text-lg font-bold">ما الذي أكلته؟</h2><p className="text-xs text-[hsl(var(--muted-foreground))]">اكتب اسم الطعام أو ارفع صورة حقيقية</p></div></div><div className="flex gap-2"><input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && estimate()} placeholder="مثال: فول مع زيت، شوفان..." className="min-w-0 flex-1 rounded-xl border bg-[hsl(var(--background))] px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]" aria-label="اسم الطعام" data-testid="input-food-search" /><button onClick={estimate} className="rounded-xl bg-[hsl(var(--primary))] px-5 text-sm font-bold text-[hsl(var(--primary-foreground))]" data-testid="button-estimate-food">قدّر</button></div>{matches.length > 0 && <div className="mt-2 rounded-xl border bg-[hsl(var(--card))] p-1">{matches.slice(0, 3).map((food) => <button key={food.label} onClick={() => { setQuery(food.label); setResult(food); }} className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-right text-xs hover:bg-[hsl(var(--muted))]" data-testid={`button-suggestion-${food.label}`}><span>{food.label}</span><span className="text-[hsl(var(--muted-foreground))]">{food.calories} سعرة</span></button>)}</div>}<div className="my-6 flex items-center gap-3 text-[10px] font-bold text-[hsl(var(--muted-foreground))]"><span className="h-px flex-1 bg-[hsl(var(--border))]" /> أو <span className="h-px flex-1 bg-[hsl(var(--border))]" /></div><input ref={fileInputRef} onChange={handleImageChange} type="file" accept="image/*" className="hidden" data-testid="input-food-image" /><button onClick={openImagePicker} disabled={imageLoading} className="paper-grid flex w-full flex-col items-center justify-center rounded-2xl border border-dashed border-[hsl(var(--primary)/.35)] px-5 py-7 text-center transition-colors hover:bg-[hsl(var(--secondary)/.35)] disabled:opacity-60" data-testid="button-upload-food-image"><span className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-[hsl(var(--secondary))] text-[hsl(var(--primary))]">{imageLoading ? <span className="h-5 w-5 animate-pulse rounded-full bg-[hsl(var(--accent))]" /> : <Upload size={19} />}</span><strong className="text-sm">{imageLoading ? 'جارٍ تجهيز الصورة...' : 'صوّر طبقك أو ارفع صورة'}</strong><span className="mt-1 text-[11px] text-[hsl(var(--muted-foreground))]">JPG وPNG حتى ٨ ميغابايت</span></button>{imagePreview && <div className="mt-4 rounded-2xl border bg-[hsl(var(--muted)/.35)] p-3"><div className="relative overflow-hidden rounded-xl"><img src={imagePreview} alt={`معاينة ${imageName}`} className="max-h-56 w-full object-cover" /><button onClick={clearImage} className="absolute left-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-[hsl(var(--foreground)/.75)] text-[hsl(var(--background))]" aria-label="إزالة الصورة" data-testid="button-remove-food-image"><X size={16} /></button></div><p className="mt-2 truncate text-xs font-semibold">{imageName}</p><div className="mt-3 flex gap-2"><input value={imageCalories} onChange={(e) => setImageCalories(e.target.value)} type="number" min="1" placeholder="السعرات التقريبية" className="min-w-0 flex-1 rounded-xl border bg-[hsl(var(--card))] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]" dir="ltr" aria-label="السعرات التقريبية للصورة" data-testid="input-image-calories" /><button onClick={estimateImage} className="rounded-xl bg-[hsl(var(--primary))] px-4 py-2 text-xs font-bold text-[hsl(var(--primary-foreground))]" data-testid="button-estimate-uploaded-image">اعتماد التقدير</button></div><p className="mt-2 text-[10px] leading-5 text-[hsl(var(--muted-foreground))]">لا يتم تخزين ملف الصورة. أدخل تقديراً تقريبياً حسب كمية الطبق.</p></div>}{loading && <div className="mt-5 rounded-2xl bg-[hsl(var(--muted)/.6)] p-5"><div className="h-3 w-2/3 animate-pulse rounded bg-[hsl(var(--border))]" /><div className="mt-3 h-3 w-1/3 animate-pulse rounded bg-[hsl(var(--border))]" /></div>}{result && <EstimateResult food={result} onAdd={() => addCalories(result.calories, result.label)} />}</section>
-      <section className="rounded-[24px] bg-[hsl(var(--secondary)/.45)] p-5 md:p-7"><div className="mb-5 flex items-center justify-between"><div><h2 className="display-font text-lg font-bold">اقتراحات سريعة</h2><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">اختَر وجبة شائعة وابدأ منها</p></div><Zap size={20} className="text-[hsl(var(--accent))]" /></div><div className="space-y-2.5">{foodKnowledge.slice(0, 4).map((food) => <button key={food.label} onClick={() => { setQuery(food.label); setResult(food); }} className="flex w-full items-center gap-3 rounded-2xl border border-[hsl(var(--border)/.7)] bg-[hsl(var(--card)/.7)] p-3 text-right hover:bg-[hsl(var(--card))]" data-testid={`button-quick-food-${food.label}`}><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[hsl(var(--card))] text-[hsl(var(--primary))]"><food.icon size={18} /></span><span className="min-w-0 flex-1"><strong className="block text-xs">{food.label}</strong><small className="text-[10px] text-[hsl(var(--muted-foreground))]">{food.portion}</small></span><span className="text-xs font-bold text-[hsl(var(--primary))]">{food.calories} <small>سعرة</small></span></button>)}</div><div className="mt-6 flex gap-2 rounded-xl border border-[hsl(var(--border)/.8)] bg-[hsl(var(--card)/.5)] p-3 text-[11px] leading-5 text-[hsl(var(--muted-foreground))]"><CircleHelp size={15} className="mt-0.5 shrink-0 text-[hsl(var(--primary))]" /> التقديرات تختلف حسب طريقة التحضير. استخدمها كبوصلة لا كحساب دقيق.</div></section>
+      <section className="card-surface rounded-[24px] p-4 sm:p-6 md:p-7">
+        <div className="mb-6 flex items-center gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[hsl(var(--secondary))] text-[hsl(var(--primary))]"><Utensils size={19} /></span>
+          <div><h2 className="display-font text-base sm:text-lg font-bold">ما الذي أكلته؟</h2><p className="text-[11px] sm:text-xs text-[hsl(var(--muted-foreground))]">مثال: 3 تمر مع لبن</p></div>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && estimate()} placeholder="اكتب اسم الأكلة أو عددها..." className="min-w-0 flex-1 rounded-xl border bg-[hsl(var(--background))] px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]" />
+          <button onClick={estimate} className="rounded-xl bg-[hsl(var(--primary))] px-5 py-3 sm:py-0 text-sm font-bold text-[hsl(var(--primary-foreground))] shrink-0">قدّر السعرات</button>
+        </div>
+        {loading && <div className="mt-5 rounded-2xl bg-[hsl(var(--muted)/.6)] p-5"><div className="h-3 w-2/3 animate-pulse rounded bg-[hsl(var(--border))]" /><div className="mt-3 h-3 w-1/3 animate-pulse rounded bg-[hsl(var(--border))]" /></div>}
+        {result && <EstimateResult food={result} onAdd={() => addCalories(result.calories, result.label)} />}
+      </section>
+      <section className="rounded-[24px] bg-[hsl(var(--secondary)/.45)] p-4 sm:p-6 md:p-7">
+        <div className="mb-5 flex items-center justify-between">
+          <div><h2 className="display-font text-base sm:text-lg font-bold">اقتراحات سريعة</h2><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">اختَر وجبة شائعة وابدأ منها</p></div>
+          <Zap size={20} className="text-[hsl(var(--accent))]" />
+        </div>
+        <div className="space-y-2.5">
+          {['3 تمر', 'بيضتين مسلوقين', '100 غرام بطاطا مسلوقة', 'كوب لبن'].map((label) => <button key={label} onClick={() => { setQuery(label); estimate(); }} className="flex w-full items-center gap-3 rounded-2xl border border-[hsl(var(--border)/.7)] bg-[hsl(var(--card)/.7)] p-3 text-right hover:bg-[hsl(var(--card))]"><span className="flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-xl bg-[hsl(var(--card))] text-[hsl(var(--primary))]"><Coffee size={18} /></span><span className="min-w-0 flex-1"><strong className="block text-xs">{label}</strong></span><span className="text-[10px] font-bold text-[hsl(var(--primary))]">حساب ذكي</span></button>)}
+        </div>
+      </section>
     </div>
   </div>;
 }
 
 function EstimateResult({ food, onAdd }: { food: Food; onAdd: () => void }) {
-  return <div className="mt-5 rounded-2xl border border-[hsl(var(--primary)/.25)] bg-[hsl(var(--secondary)/.4)] p-4"><div className="flex items-center justify-between"><div><div className="text-[11px] font-bold text-[hsl(var(--primary))]">تقدير رفيق</div><h3 className="mt-1 font-bold">{food.label}</h3><p className="mt-1 text-[11px] text-[hsl(var(--muted-foreground))]">{food.portion} · {food.detail}</p></div><div className="text-left"><div className="display-font text-2xl font-bold text-[hsl(var(--primary))]">{food.calories}</div><div className="text-[10px] text-[hsl(var(--muted-foreground))]">سعرة تقريباً</div></div></div><button onClick={onAdd} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-[hsl(var(--primary))] py-3 text-xs font-bold text-[hsl(var(--primary-foreground))]" data-testid="button-add-estimated-food"><Plus size={15} /> أضف إلى سعرات اليوم</button></div>;
+  return <div className="mt-5 rounded-2xl border border-[hsl(var(--primary)/.25)] bg-[hsl(var(--secondary)/.4)] p-4"><div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"><div><div className="text-[11px] font-bold text-[hsl(var(--primary))]">النتيجة والتحليل</div><h3 className="mt-1 font-bold">{food.label}</h3><p className="mt-1 text-[11px] leading-5 text-[hsl(var(--muted-foreground))]">{food.detail}</p></div><div className="text-left"><div className="display-font text-2xl font-bold text-[hsl(var(--primary))]">{food.calories}</div><div className="text-[10px] text-[hsl(var(--muted-foreground))]">سعرة تقريباً</div></div></div><button onClick={onAdd} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-[hsl(var(--primary))] py-3 text-xs font-bold text-[hsl(var(--primary-foreground))]"><Plus size={15} /> أضف إلى سعرات اليوم</button></div>;
 }
 
 const guideFoods = [
@@ -421,28 +508,25 @@ const guideFoods = [
   { name: 'الفول السوداني', tag: 'رفيق الجيب', calories: '٥٦٧', unit: 'سعرة / ١٠٠غ', note: 'محمصاً أو على شكل زبدة مع الموز والخبز.', icon: ShoppingBasket },
   { name: 'الزبادي المحلي', tag: 'بروتين يومي', calories: '١٥٠', unit: 'سعرة / علبة', note: 'اختَر كامل الدسم وأضف إليه العسل أو الشوفان.', icon: Droplets },
   { name: 'الشوفان', tag: 'فطور يشبعك', calories: '٣٨٩', unit: 'سعرة / ١٠٠غ', note: 'اطهه بالحليب، ثم أضف التمر أو الطحينة.', icon: Wheat },
-  { name: 'البيض', tag: 'أساس اقتصادي', calories: '١٤٠', unit: 'سعرة / بيضتين', note: 'مع الخبز وزيت الزيتون يصبح طبقاً متكاملاً.', icon: Utensils },
-  { name: 'العدس والأرز', tag: 'طبق البيت الذكي', calories: '٤٨٠', unit: 'سعرة / طبق', note: 'وجبة دافئة، مشبعة، وتزداد طاقتها بملعقة طحينة.', icon: BowlIcon },
+  { name: 'البطاطا المسلوقة', tag: 'نشويات اقتصادية', calories: '٢٦٠', unit: 'سعرة / حبتين', note: 'اهرَسها مع ملعقة زيت زيتون أو سمنة لرفع سعراتها بسهولة.', icon: Utensils },
+  { name: 'العدس والأرز', tag: 'طبق البيت الذكي', calories: '٤٨٠', unit: 'سعرة / طبق', note: 'وجبة دافئة، مشبعة، وتزداد طاقتها بملعقة طحينة.', icon: Target },
 ];
-function BowlIcon({ size = 20 }: { size?: number }) { return <div style={{ width: size, height: size }} className="rounded-b-full border-2 border-current border-t-0" />; }
 
 function GuidePage() {
   const [saved, setSaved] = useState<string[]>([]);
   const toggleSaved = (name: string) => setSaved((current) => current.includes(name) ? current.filter((item) => item !== name) : [...current, name]);
-  return <div className="mx-auto max-w-[1160px] p-5 md:p-9 lg:p-12" dir="rtl">
+  return <div className="mx-auto max-w-[1160px] p-4 sm:p-6 md:p-9 lg:p-12" dir="rtl">
     <PageHeader eyebrow="أكل البيت، بذكاء" title="دليل الزيادة الاقتصادية" description="أطعمة مألوفة، متاحة، وتضيف طاقة حقيقية لطبقك من دون أن تثقل ميزانيتك." action={<div className="hidden rounded-full bg-[hsl(var(--secondary))] px-4 py-2 text-xs font-bold text-[hsl(var(--primary))] md:block"><WalletCards size={14} className="ml-1 inline" /> خيارات على قد اليد</div>} />
     <section className="mb-7 grid gap-4 md:grid-cols-[1fr_1.5fr]"><div className="rounded-[24px] bg-[hsl(var(--primary))] p-6 text-[hsl(var(--primary-foreground))]"><div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]"><Heart size={19} /></div><h2 className="display-font text-xl font-bold leading-9">لا تحتاج مكونات غريبة<br />كي تنمو جيداً.</h2><p className="mt-3 text-xs leading-6 text-[hsl(var(--primary-foreground)/.7)]">اجعل وجباتك المعتادة أغنى بقليل. ملعقة هنا، حفنة هناك، والفرق يتراكم.</p></div><div className="card-surface flex items-center gap-5 rounded-[24px] p-6"><div className="relative hidden h-28 w-28 shrink-0 rounded-full border-[12px] border-[hsl(var(--secondary))] sm:block"><div className="absolute inset-[-12px] rounded-full border-[12px] border-t-[hsl(var(--accent))] border-r-transparent border-b-transparent border-l-transparent rotate-[35deg]" /><div className="absolute inset-0 flex items-center justify-center"><Flame size={25} className="text-[hsl(var(--accent))]" /></div></div><div><div className="text-xs font-bold text-[hsl(var(--primary))]">قاعدة رفيق</div><h2 className="mt-2 display-font text-lg font-bold">ارفع السعرات، لا حجم الطبق</h2><p className="mt-2 text-xs leading-6 text-[hsl(var(--muted-foreground))]">الدهون الجيدة مثل زيت الزيتون والطحينة تمنحك طاقة مركزة تساعدك على الوصول لهدفك براحة.</p></div></div></section>
     <div className="mb-4 flex items-center justify-between"><div><h2 className="display-font text-xl font-bold">رفّ المطبخ</h2><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">أفكار عملية لوجبتك القادمة</p></div><span className="text-xs font-semibold text-[hsl(var(--muted-foreground))]">{saved.length ? `حفظت ${saved.length} اقتراحات` : 'اضغط للحفظ'}</span></div>
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{guideFoods.map(({ name, tag, calories, unit, note, icon: Icon }, index) => <article key={name} className={`card-surface rise-in rounded-[22px] p-5 ${index > 2 ? 'delay-2' : ''}`}><div className="mb-5 flex items-start justify-between"><span className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-[hsl(var(--secondary))] text-[hsl(var(--primary))]"><Icon size={21} /></span><button onClick={() => toggleSaved(name)} className={`rounded-full p-2 transition-colors ${saved.includes(name) ? 'bg-[hsl(var(--accent)/.25)] text-[hsl(var(--accent-foreground))]' : 'text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]'}`} aria-label={saved.includes(name) ? `إزالة ${name} من المحفوظات` : `حفظ ${name}`} data-testid={`button-save-food-${name}`}><BookmarkIcon filled={saved.includes(name)} /></button></div><div className="text-[10px] font-bold text-[hsl(var(--primary))]">{tag}</div><h3 className="mt-1 display-font text-lg font-bold">{name}</h3><p className="mt-2 min-h-[44px] text-xs leading-6 text-[hsl(var(--muted-foreground))]">{note}</p><div className="mt-4 flex items-end justify-between border-t pt-3"><span className="text-[10px] text-[hsl(var(--muted-foreground))]">{unit}</span><span className="text-lg font-bold text-[hsl(var(--primary))]">{calories}</span></div></article>)}</div>
-    <div className="mt-7 flex items-start gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 text-xs leading-6 text-[hsl(var(--muted-foreground))]"><Info size={17} className="mt-1 shrink-0 text-[hsl(var(--primary))]" /><span>نصيحة توفير: حضّر كمية أكبر من الأرز أو العدس ليومين، واحتفظ بالفول السوداني والتمر في مكان قريب لتسهيل السناك.</span></div>
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{guideFoods.map(({ name, tag, calories, unit, note, icon: Icon }, index) => <article key={name} className={`card-surface rise-in rounded-[22px] p-5 ${index > 2 ? 'delay-2' : ''}`}><div className="mb-5 flex items-start justify-between"><span className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-[hsl(var(--secondary))] text-[hsl(var(--primary))]"><Icon size={21} /></span><button onClick={() => toggleSaved(name)} className={`rounded-full p-2 transition-colors ${saved.includes(name) ? 'bg-[hsl(var(--accent)/.25)] text-[hsl(var(--accent-foreground))]' : 'text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]'}`}><BookmarkIcon filled={saved.includes(name)} /></button></div><div className="text-[10px] font-bold text-[hsl(var(--primary))]">{tag}</div><h3 className="mt-1 display-font text-lg font-bold">{name}</h3><p className="mt-2 min-h-[44px] text-xs leading-6 text-[hsl(var(--muted-foreground))]">{note}</p><div className="mt-4 flex items-end justify-between border-t pt-3"><span className="text-[10px] text-[hsl(var(--muted-foreground))]">{unit}</span><span className="text-lg font-bold text-[hsl(var(--primary))]">{calories}</span></div></article>)}</div>
   </div>;
 }
 function BookmarkIcon({ filled }: { filled: boolean }) { return <svg width="17" height="17" viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" /></svg>; }
 
 function NotFound() {
-  return <div className="flex min-h-[100dvh] items-center justify-center p-6 text-center" dir="rtl"><div><div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-[hsl(var(--secondary))] text-[hsl(var(--primary))]"><CircleHelp size={28} /></div><h1 className="display-font text-2xl font-bold">هذه الصفحة أخذت استراحة</h1><p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">لنعد إلى مساحتك اليومية.</p><Link href="/" className="mt-6 inline-flex items-center gap-2 rounded-xl bg-[hsl(var(--primary))] px-5 py-3 text-sm font-bold text-[hsl(var(--primary-foreground))]" data-testid="link-back-home"><ArrowRightIcon /> العودة للرئيسية</Link></div></div>;
+  return <div className="flex min-h-[100dvh] items-center justify-center p-6 text-center" dir="rtl"><div><div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-[hsl(var(--secondary))] text-[hsl(var(--primary))]"><CircleHelp size={28} /></div><h1 className="display-font text-2xl font-bold">هذه الصفحة أخذت استراحة</h1><Link href="/" className="mt-6 inline-flex items-center gap-2 rounded-xl bg-[hsl(var(--primary))] px-5 py-3 text-sm font-bold text-[hsl(var(--primary-foreground))]"><ChevronRight size={16} /> العودة للرئيسية</Link></div></div>;
 }
-function ArrowRightIcon() { return <ChevronRight size={16} />; }
 
 function Router() {
   const [location] = useLocation();
