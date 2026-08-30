@@ -1,4 +1,4 @@
-import { type ReactNode, createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { type ChangeEvent, type ReactNode, createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
@@ -13,35 +13,35 @@ type WeightEntry = { date: string; weight: number };
 type DailyLog = { date: string; calories: number; habits: Record<HabitKey, boolean> };
 type ScannedFood = { query: string; label: string; calories: number };
 type AppData = { settings: SettingsData; weights: WeightEntry[]; logs: DailyLog[]; scannedFoods: ScannedFood[] };
+type ThemeMode = 'light' | 'dark';
 
 const queryClient = new QueryClient();
+const STORAGE_VERSION = 2;
 const todayKey = () => new Date().toISOString().slice(0, 10);
-const dayBefore = (n: number) => {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d.toISOString().slice(0, 10);
-};
-const defaultData: AppData = {
+const todayLabel = () => new Date().toLocaleDateString('ar-EG', { weekday: 'long', day: 'numeric', month: 'long' });
+const emptyData: AppData = {
   settings: { dailyGoal: 2800, targetWeight: 67, startingWeight: 60, notificationsEnabled: false },
-  weights: [
-    { date: dayBefore(21), weight: 60 },
-    { date: dayBefore(18), weight: 60.4 },
-    { date: dayBefore(14), weight: 60.7 },
-    { date: dayBefore(11), weight: 61.1 },
-    { date: dayBefore(7), weight: 61.4 },
-    { date: dayBefore(4), weight: 61.6 },
-    { date: todayKey(), weight: 61.8 },
-  ],
-  logs: [{ date: todayKey(), calories: 1730, habits: { shake: true, oil: false, snack: true, workout: false } }],
+  weights: [],
+  logs: [],
   scannedFoods: [],
 };
 
 function readSaved(): AppData {
   try {
     const saved = localStorage.getItem('rafiq-health-data');
-    if (saved) return { ...defaultData, ...JSON.parse(saved) };
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed?.version !== STORAGE_VERSION) return emptyData;
+      return {
+        ...emptyData,
+        settings: { ...emptyData.settings, ...(parsed.settings ?? {}) },
+        weights: Array.isArray(parsed.weights) ? parsed.weights : [],
+        logs: Array.isArray(parsed.logs) ? parsed.logs : [],
+        scannedFoods: Array.isArray(parsed.scannedFoods) ? parsed.scannedFoods : [],
+      };
+    }
   } catch { /* first run or blocked storage */ }
-  return defaultData;
+  return emptyData;
 }
 
 type RafiqContextValue = {
@@ -53,6 +53,8 @@ type RafiqContextValue = {
   addWeight: (weight: number) => void;
   recordScanned: (food: ScannedFood) => void;
   notify: (message: string) => void;
+  theme: ThemeMode;
+  toggleTheme: () => void;
 };
 const RafiqContext = createContext<RafiqContextValue | null>(null);
 
@@ -64,8 +66,16 @@ function useRafiq() {
 
 function RafiqProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<AppData>(readSaved);
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    const saved = localStorage.getItem('rafiq-theme');
+    return saved === 'dark' || saved === 'light' ? saved : 'light';
+  });
   const [toast, setToast] = useState('');
-  useEffect(() => localStorage.setItem('rafiq-health-data', JSON.stringify(data)), [data]);
+  useEffect(() => localStorage.setItem('rafiq-health-data', JSON.stringify({ version: STORAGE_VERSION, ...data })), [data]);
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    localStorage.setItem('rafiq-theme', theme);
+  }, [theme]);
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(''), 2600);
@@ -98,7 +108,8 @@ function RafiqProvider({ children }: { children: ReactNode }) {
   };
   const recordScanned = (food: ScannedFood) => setData((current) => ({ ...current, scannedFoods: [food, ...current.scannedFoods.filter((item) => item.query !== food.query)].slice(0, 12) }));
   const notify = (message: string) => setToast(message);
-  return <RafiqContext.Provider value={{ data, todayLog, updateSettings, toggleHabit, addCalories, addWeight, recordScanned, notify }}>
+  const toggleTheme = () => setTheme((current) => current === 'light' ? 'dark' : 'light');
+  return <RafiqContext.Provider value={{ data, todayLog, updateSettings, toggleHabit, addCalories, addWeight, recordScanned, notify, theme, toggleTheme }}>
     {children}
     {toast && <div className="fixed bottom-24 left-1/2 z-50 -translate-x-1/2 rounded-full bg-[hsl(var(--foreground))] px-5 py-3 text-sm font-semibold text-[hsl(var(--background))] shadow-lg md:bottom-7" role="status" data-testid="status-toast">{toast}</div>}
   </RafiqContext.Provider>;
@@ -116,6 +127,23 @@ function BrandMark() {
     <div className="flex h-11 w-11 items-center justify-center rounded-[15px] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))] shadow-sm"><Leaf size={23} strokeWidth={2.4} /></div>
     <div><div className="display-font text-base font-bold leading-5">رفيق</div><div className="text-[11px] text-[hsl(var(--sidebar-foreground)/.62)]">الزيادة الصحية</div></div>
   </div>;
+}
+
+function ThemeToggle({ mobile = false }: { mobile?: boolean }) {
+  const { theme, toggleTheme } = useRafiq();
+  const isDark = theme === 'dark';
+  return <button
+    onClick={toggleTheme}
+    className={mobile
+      ? 'flex h-11 w-11 items-center justify-center rounded-full border bg-[hsl(var(--card)/.94)] text-[hsl(var(--foreground))] shadow-md backdrop-blur transition-colors hover:bg-[hsl(var(--muted))]'
+      : 'flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-semibold text-[hsl(var(--sidebar-foreground)/.64)] hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-foreground))]'}
+    aria-label={isDark ? 'تفعيل الوضع الفاتح' : 'تفعيل الوضع الداكن'}
+    title={isDark ? 'الوضع الفاتح' : 'الوضع الداكن'}
+    data-testid="button-theme-toggle"
+  >
+    {isDark ? <Sun size={18} /> : <Moon size={18} />}
+    {!mobile && <><span>{isDark ? 'الوضع الفاتح' : 'الوضع الداكن'}</span><span className="mr-auto text-[10px] text-[hsl(var(--sidebar-foreground)/.42)]">{isDark ? 'LIGHT' : 'DARK'}</span></>}
+  </button>;
 }
 
 function Sidebar() {
@@ -147,6 +175,7 @@ function Sidebar() {
         </div>
         <button onClick={() => setSettingsOpen(true)} className="flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-semibold text-[hsl(var(--sidebar-foreground)/.64)] hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-foreground))]" data-testid="button-open-settings"><Settings size={18} /><span>الإعدادات</span></button>
         <button onClick={requestNotifications} className="mt-1 flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-semibold text-[hsl(var(--sidebar-foreground)/.64)] hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-foreground))]" data-testid="button-notification-settings"><Bell size={18} /><span>{data.settings.notificationsEnabled ? 'التذكيرات مفعّلة' : 'فعّل التذكيرات'}</span></button>
+        <div className="mt-1"><ThemeToggle /></div>
       </div>
     </aside>
     {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} onNotify={requestNotifications} />}
@@ -183,7 +212,7 @@ function MobileNav() {
 }
 
 function AppLayout({ children }: { children: ReactNode }) {
-  return <div className="app-shell flex" dir="rtl"><Sidebar /><main className="min-w-0 flex-1 pb-20 md:pb-0">{children}</main><MobileNav /></div>;
+  return <div className="app-shell flex" dir="rtl"><Sidebar /><div className="fixed left-4 top-4 z-20 md:hidden"><ThemeToggle mobile /></div><main className="min-w-0 flex-1 pb-20 md:pb-0">{children}</main><MobileNav /></div>;
 }
 
 function PageHeader({ eyebrow, title, description, action }: { eyebrow?: string; title: string; description?: string; action?: ReactNode }) {
@@ -204,6 +233,13 @@ function ProgressRing({ value, max }: { value: number; max: number }) {
 
 function WeightChart({ weights, target }: { weights: WeightEntry[]; target: number }) {
   const points = weights.slice(-7);
+  if (!points.length) {
+    return <div className="flex h-52 flex-col items-center justify-center rounded-2xl border border-dashed bg-[hsl(var(--muted)/.35)] px-6 text-center" dir="rtl">
+      <Scale size={24} className="mb-3 text-[hsl(var(--primary))]" />
+      <p className="text-sm font-bold">مسارك يبدأ من أول قياس</p>
+      <p className="mt-1 max-w-xs text-xs leading-6 text-[hsl(var(--muted-foreground))]">سجّل وزنك اليوم حتى يظهر تقدمك نحو {target} كغ هنا.</p>
+    </div>;
+  }
   const min = Math.min(59.5, ...points.map((p) => p.weight));
   const max = Math.max(target, ...points.map((p) => p.weight));
   const pointString = points.map((point, i) => `${(i / Math.max(1, points.length - 1)) * 100},${96 - ((point.weight - min) / Math.max(.1, max - min)) * 72}`).join(' ');
@@ -238,32 +274,32 @@ function HomePage() {
   const { data, todayLog, addWeight } = useRafiq();
   const [period, setPeriod] = useState<Period>('أسبوعي');
   const [weight, setWeight] = useState('');
-  const latestWeight = data.weights[data.weights.length - 1]?.weight ?? data.settings.startingWeight;
-  const gained = latestWeight - data.settings.startingWeight;
+  const latestWeight = data.weights[data.weights.length - 1]?.weight ?? null;
+  const gained = latestWeight === null ? 0 : latestWeight - data.settings.startingWeight;
   const habitsDone = Object.values(todayLog.habits).filter(Boolean).length;
   const visibleWeights = period === 'يومي' ? data.weights.slice(-1) : period === 'شهري' ? data.weights : data.weights.slice(-7);
   const saveWeight = () => { addWeight(Number(weight)); setWeight(''); };
   return <div className="mx-auto max-w-[1280px] p-5 md:p-9 lg:p-12" dir="rtl">
-    <PageHeader eyebrow="الثلاثاء، ٢١ مايو" title="أهلاً بك في رفيقك" description="خطوة صغيرة اليوم، جسم أقوى غداً. خذ نظرة سريعة على إيقاعك ثم اختر ما يناسبك." action={<div className="hidden items-center gap-2 rounded-full border bg-[hsl(var(--card))] px-3 py-2 text-xs font-semibold text-[hsl(var(--muted-foreground))] md:flex"><Sun size={15} className="text-[hsl(var(--accent))]" /> يوم هادئ للنمو</div>} />
+    <PageHeader eyebrow={todayLabel()} title="أهلاً بك في رفيقك" description="خطوة صغيرة اليوم، جسم أقوى غداً. خذ نظرة سريعة على إيقاعك ثم اختر ما يناسبك." action={<div className="hidden items-center gap-2 rounded-full border bg-[hsl(var(--card))] px-3 py-2 text-xs font-semibold text-[hsl(var(--muted-foreground))] md:flex"><Sun size={15} className="text-[hsl(var(--accent))]" /> يوم هادئ للنمو</div>} />
     <div className="grid gap-5 lg:grid-cols-[1.35fr_.65fr]">
       <FeedbackCard />
       <section className="card-surface flex items-center justify-between gap-3 rounded-[24px] p-5" aria-label="ملخص اليوم"><div><div className="text-xs font-semibold text-[hsl(var(--muted-foreground))]">إنجاز اليوم</div><div className="mt-2 display-font text-3xl font-bold"><ArabicNumber value={habitsDone} /><span className="mr-1 text-base font-medium text-[hsl(var(--muted-foreground))]">/ ٤ عادات</span></div><p className="mt-2 text-xs text-[hsl(var(--muted-foreground))]">{habitsDone === 4 ? 'يوم مكتمل، أحسنت.' : 'ما زال أمامك وقت لطيف.'}</p></div><div className="flex h-16 w-16 items-center justify-center rounded-full border-[6px] border-[hsl(var(--secondary))] text-[hsl(var(--primary))]"><Check size={26} /></div></section>
     </div>
     <div className="mt-5 grid gap-5 xl:grid-cols-[1.35fr_.65fr]">
-      <section className="card-surface rounded-[24px] p-5 md:p-7" aria-labelledby="progress-title">
+       <section className="card-surface rounded-[24px] p-5 md:p-7" aria-labelledby="progress-title">
         <div className="mb-8 flex items-start justify-between gap-4"><div><div className="flex items-center gap-2"><TrendingUp size={18} className="text-[hsl(var(--primary))]" /><h2 id="progress-title" className="display-font text-lg font-bold">مسار الزيادة</h2></div><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{period === 'يومي' ? 'قراءة اليوم' : period === 'شهري' ? 'نظرة على الشهر' : 'آخر سبعة أيام'} · من {data.settings.startingWeight} كغ إلى {data.settings.targetWeight} كغ</p></div><ViewToggle period={period} setPeriod={setPeriod} /></div>
-        <div className="relative"><WeightChart weights={visibleWeights} target={data.settings.targetWeight} /><div className="mt-8 flex items-center justify-between border-t pt-4 text-xs"><span className="text-[hsl(var(--muted-foreground))]">الوزن الحالي <strong className="mr-1 text-base text-[hsl(var(--foreground))]"><ArabicNumber value={latestWeight.toFixed(1)} suffix="كغ" /></strong></span><span className="rounded-full bg-[hsl(var(--secondary))] px-3 py-1.5 font-bold text-[hsl(var(--primary))]">+{gained.toFixed(1)} كغ منذ البداية</span></div></div>
+         <div className="relative"><WeightChart weights={visibleWeights} target={data.settings.targetWeight} /><div className="mt-8 flex items-center justify-between border-t pt-4 text-xs"><span className="text-[hsl(var(--muted-foreground))]">الوزن الحالي <strong className="mr-1 text-base text-[hsl(var(--foreground))]">{latestWeight === null ? '—' : <ArabicNumber value={latestWeight.toFixed(1)} suffix="كغ" />}</strong></span><span className="rounded-full bg-[hsl(var(--secondary))] px-3 py-1.5 font-bold text-[hsl(var(--primary))]">{latestWeight === null ? 'بانتظار أول قياس' : `+${gained.toFixed(1)} كغ منذ البداية`}</span></div></div>
       </section>
       <section className="card-surface rounded-[24px] p-5 md:p-7" aria-labelledby="weight-log-title">
         <div className="mb-5 flex items-center justify-between"><div><h2 id="weight-log-title" className="display-font text-lg font-bold">قياس هذا الصباح</h2><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">مرة واحدة في الأسبوع تكفي</p></div><Scale size={22} className="text-[hsl(var(--accent))]" /></div>
-        <div className="flex items-center gap-2"><input value={weight} onChange={(e) => setWeight(e.target.value)} type="number" step=".1" placeholder={latestWeight.toFixed(1)} className="w-full rounded-xl border bg-[hsl(var(--background))] px-4 py-3 text-lg font-bold outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]" dir="ltr" aria-label="الوزن بالكيلوغرام" data-testid="input-today-weight" /><span className="text-sm text-[hsl(var(--muted-foreground))]">كغ</span></div>
+        <div className="flex items-center gap-2"><input value={weight} onChange={(e) => setWeight(e.target.value)} type="number" step=".1" placeholder={latestWeight === null ? 'مثال: ٦٠' : latestWeight.toFixed(1)} className="w-full rounded-xl border bg-[hsl(var(--background))] px-4 py-3 text-lg font-bold outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]" dir="ltr" aria-label="الوزن بالكيلوغرام" data-testid="input-today-weight" /><span className="text-sm text-[hsl(var(--muted-foreground))]">كغ</span></div>
         <button onClick={saveWeight} disabled={!weight} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[hsl(var(--secondary))] py-3 text-sm font-bold text-[hsl(var(--primary))] transition-opacity disabled:cursor-not-allowed disabled:opacity-40 hover:opacity-85" data-testid="button-save-weight"><Plus size={17} /> حفظ القياس</button>
         <div className="mt-5 flex gap-3 rounded-xl bg-[hsl(var(--muted)/.6)] p-3 text-xs leading-6 text-[hsl(var(--muted-foreground))]"><Info size={16} className="mt-1 shrink-0 text-[hsl(var(--primary))]" /> اختَر نفس الوقت والظروف تقريباً لتحصل على قراءة أصدق.</div>
       </section>
     </div>
     <div className="mt-5 grid gap-5 md:grid-cols-2">
-      <section className="card-surface rounded-[24px] p-5" aria-label="هدف السعرات"><div className="mb-3 flex items-center justify-between"><div><h2 className="display-font text-lg font-bold">وقود يومك</h2><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">سعرات مسجلة اليوم</p></div><Flame size={21} className="text-[hsl(var(--accent))]" /></div><div className="flex items-center gap-5"><ProgressRing value={todayLog.calories} max={data.settings.dailyGoal} /><div><div className="text-2xl font-bold"><ArabicNumber value={todayLog.calories} suffix="سعرة" /></div><p className="mt-2 text-xs leading-6 text-[hsl(var(--muted-foreground))]">تبقّى لك <strong className="text-[hsl(var(--foreground))]"><ArabicNumber value={Math.max(0, data.settings.dailyGoal - todayLog.calories)} /></strong> سعرة للوصول لهدفك.</p><Link href="/tracker" className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-[hsl(var(--primary))]" data-testid="link-go-tracker">أكمل يومك <ArrowLeft size={14} /></Link></div></div></section>
-      <section className="card-surface flex items-center justify-between gap-4 rounded-[24px] p-5"><div><div className="mb-2 flex items-center gap-2 text-xs font-bold text-[hsl(var(--primary))]"><Goal size={15} /> وجهتك القادمة</div><h2 className="display-font text-xl font-bold"><ArabicNumber value={data.settings.targetWeight.toFixed(1)} suffix="كغ" /></h2><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">باقي {Math.max(0, data.settings.targetWeight - latestWeight).toFixed(1)} كغ بإيقاعك الخاص.</p></div><div className="relative flex h-24 w-24 items-center justify-center rounded-full border-4 border-[hsl(var(--secondary))]"><div className="absolute inset-1 rounded-full border-4 border-t-[hsl(var(--accent))] border-l-transparent border-b-transparent border-r-transparent rotate-45" /><Target size={27} className="text-[hsl(var(--primary))]" /></div></section>
+       <section className="card-surface rounded-[24px] p-5" aria-label="هدف السعرات"><div className="mb-3 flex items-center justify-between"><div><h2 className="display-font text-lg font-bold">وقود يومك</h2><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">سعرات مسجلة اليوم</p></div><Flame size={21} className="text-[hsl(var(--accent))]" /></div><div className="flex items-center gap-5"><ProgressRing value={todayLog.calories} max={data.settings.dailyGoal} /><div><div className="text-2xl font-bold"><ArabicNumber value={todayLog.calories} suffix="سعرة" /></div><p className="mt-2 text-xs leading-6 text-[hsl(var(--muted-foreground))]">تبقّى لك <strong className="text-[hsl(var(--foreground))]"><ArabicNumber value={Math.max(0, data.settings.dailyGoal - todayLog.calories)} /></strong> سعرة للوصول لهدفك.</p><Link href="/tracker" className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-[hsl(var(--primary))]" data-testid="link-go-tracker">أكمل يومك <ArrowLeft size={14} /></Link></div></div></section>
+       <section className="card-surface flex items-center justify-between gap-4 rounded-[24px] p-5"><div><div className="mb-2 flex items-center gap-2 text-xs font-bold text-[hsl(var(--primary))]"><Goal size={15} /> وجهتك القادمة</div><h2 className="display-font text-xl font-bold"><ArabicNumber value={data.settings.targetWeight.toFixed(1)} suffix="كغ" /></h2><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{latestWeight === null ? 'سجّل أول قياس لتعرف المسافة المتبقية.' : `باقي ${Math.max(0, data.settings.targetWeight - latestWeight).toFixed(1)} كغ بإيقاعك الخاص.`}</p></div><div className="relative flex h-24 w-24 items-center justify-center rounded-full border-4 border-[hsl(var(--secondary))]"><div className="absolute inset-1 rounded-full border-4 border-t-[hsl(var(--accent))] border-l-transparent border-b-transparent border-r-transparent rotate-45" /><Target size={27} className="text-[hsl(var(--primary))]" /></div></section>
     </div>
   </div>;
 }
@@ -286,7 +322,7 @@ function TrackerPage() {
   };
   return <div className="mx-auto max-w-[1080px] p-5 md:p-9 lg:p-12" dir="rtl">
     <PageHeader eyebrow="روتين بسيط، أثر كبير" title="متابعة يومك" description="لا نبحث عن الكمال. أربع عادات صغيرة تعطي جسمك إشارة ثابتة بأنه في أمان للنمو." />
-    <section className="mb-5 overflow-hidden rounded-[24px] bg-[hsl(var(--primary))] p-5 text-[hsl(var(--primary-foreground))] md:p-7"><div className="flex flex-wrap items-end justify-between gap-5"><div><div className="flex items-center gap-2 text-xs font-semibold text-[hsl(var(--primary-foreground)/.68)]"><Gauge size={16} /> الثلاثاء، ٢١ مايو</div><h2 className="mt-2 display-font text-2xl font-bold">إيقاعك اليومي</h2><p className="mt-1 text-sm text-[hsl(var(--primary-foreground)/.7)]">أنجزت {completed} من ٤ عادات حتى الآن.</p></div><div className="min-w-[190px]"><div className="mb-2 flex justify-between text-xs"><span>التقدم</span><span dir="ltr">{completed * 25}%</span></div><div className="h-2 rounded-full bg-[hsl(var(--primary-foreground)/.16)]"><div className="h-full rounded-full bg-[hsl(var(--accent))] transition-all duration-500" style={{ width: `${completed * 25}%` }} /></div></div></div></section>
+     <section className="mb-5 overflow-hidden rounded-[24px] bg-[hsl(var(--primary))] p-5 text-[hsl(var(--primary-foreground))] md:p-7"><div className="flex flex-wrap items-end justify-between gap-5"><div><div className="flex items-center gap-2 text-xs font-semibold text-[hsl(var(--primary-foreground)/.68)]"><Gauge size={16} /> {todayLabel()}</div><h2 className="mt-2 display-font text-2xl font-bold">إيقاعك اليومي</h2><p className="mt-1 text-sm text-[hsl(var(--primary-foreground)/.7)]">أنجزت {completed} من ٤ عادات حتى الآن.</p></div><div className="min-w-[190px]"><div className="mb-2 flex justify-between text-xs"><span>التقدم</span><span dir="ltr">{completed * 25}%</span></div><div className="h-2 rounded-full bg-[hsl(var(--primary-foreground)/.16)]"><div className="h-full rounded-full bg-[hsl(var(--accent))] transition-all duration-500" style={{ width: `${completed * 25}%` }} /></div></div></div></section>
     <div className="grid gap-5 lg:grid-cols-[1.2fr_.8fr]">
       <section className="card-surface rounded-[24px] p-5 md:p-7"><div className="mb-5 flex items-center justify-between"><div><h2 className="display-font text-lg font-bold">عادات رفيق الأربعة</h2><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">اضغط على العادة بعد إنجازها</p></div><span className="rounded-full bg-[hsl(var(--secondary))] px-3 py-1 text-xs font-bold text-[hsl(var(--primary))]">{completed === 4 ? 'يوم مكتمل' : `${completed}/٤`}</span></div><div className="grid gap-3 sm:grid-cols-2">{habits.map(({ key, title, description, icon: Icon, color }) => { const checked = todayLog.habits[key]; return <button key={key} onClick={() => toggleHabit(key)} className={`group flex items-center gap-3 rounded-2xl border p-4 text-right transition-all ${checked ? 'border-[hsl(var(--primary)/.28)] bg-[hsl(var(--secondary)/.55)]' : 'bg-[hsl(var(--background)/.5)] hover:border-[hsl(var(--primary)/.35)]'}`} data-testid={`button-habit-${key}`} aria-pressed={checked}><span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] ${color} ${checked ? 'check-pop' : ''}`}>{checked ? <Check size={20} strokeWidth={2.5} /> : <Icon size={20} />}</span><span className="min-w-0"><strong className={`block text-sm ${checked ? 'text-[hsl(var(--primary))]' : ''}`}>{title}</strong><small className="mt-1 block text-[11px] leading-5 text-[hsl(var(--muted-foreground))]">{description}</small></span><span className={`mr-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${checked ? 'border-[hsl(var(--primary))] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]' : 'border-[hsl(var(--border))] text-transparent'}`}><Check size={12} /></span></button>; })}</div></section>
       <section className="card-surface rounded-[24px] p-5 md:p-7"><div className="mb-5 flex items-center justify-between"><div><h2 className="display-font text-lg font-bold">أضف ما أكلت</h2><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">رقم تقريبي أفضل من عدم التسجيل</p></div><Plus size={21} className="text-[hsl(var(--accent))]" /></div><div className="rounded-2xl bg-[hsl(var(--muted)/.65)] p-4"><label className="text-xs font-bold text-[hsl(var(--muted-foreground))]">سعرات يدوية<input value={calories} onChange={(e) => setCalories(e.target.value)} type="number" min="1" placeholder="مثال: 450" className="mt-2 w-full rounded-xl border bg-[hsl(var(--card))] px-3 py-3 text-base font-semibold outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]" dir="ltr" data-testid="input-manual-calories" /></label><button onClick={addManual} disabled={!calories} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[hsl(var(--primary))] py-3 text-sm font-bold text-[hsl(var(--primary-foreground))] disabled:opacity-40" data-testid="button-add-manual-calories"><Plus size={16} /> إضافة إلى اليوم</button></div><div className="mt-5 flex items-center gap-3 border-t pt-4"><button onClick={toggleNotifications} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[hsl(var(--secondary))] text-[hsl(var(--primary))]" aria-label="تفعيل تذكير المساء" data-testid="button-enable-reminder"><Bell size={18} /></button><p className="text-xs leading-5 text-[hsl(var(--muted-foreground))]">تذكير لطيف عند ٩ مساءً لمشروبك عالي السعرات.</p></div></section>
@@ -310,6 +346,10 @@ function ScannerPage() {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [imageLoading, setImageLoading] = useState(false);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imageName, setImageName] = useState('');
+  const [imageCalories, setImageCalories] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [result, setResult] = useState<Food | null>(null);
   const matches = useMemo(() => query.trim() ? foodKnowledge.filter((food) => food.label.includes(query.trim())) : [], [query]);
   const estimate = () => {
@@ -317,14 +357,56 @@ function ScannerPage() {
     setLoading(true); setResult(null);
     window.setTimeout(() => { const food = matches[0] ?? { label: query.trim(), calories: 300, portion: 'حصة متوسطة', detail: 'تقدير أولي قابل للتعديل', icon: Utensils }; setResult(food); recordScanned({ query: query.trim(), label: food.label, calories: food.calories }); setLoading(false); }, 550);
   };
-  const upload = () => {
-    setImageLoading(true); setResult(null);
-    window.setTimeout(() => { const food = { label: 'طبق منزلي متوازن', calories: 560, portion: 'صورة تقديرية', detail: 'تحليل بصري تجريبي — راجع الكمية بعينك', icon: Utensils }; setImageLoading(false); setResult(food); recordScanned({ query: 'صورة طبق', label: food.label, calories: food.calories }); notify('تم تقدير الطبق من الصورة'); }, 1100);
+  const openImagePicker = () => fileInputRef.current?.click();
+  const handleImageChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      notify('اختر ملف صورة صالحاً');
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      notify('حجم الصورة يجب أن يكون أقل من ٨ ميغابايت');
+      return;
+    }
+    setImageLoading(true);
+    setResult(null);
+    const reader = new FileReader();
+    reader.onload = () => {
+      setImagePreview(String(reader.result));
+      setImageName(file.name);
+      setImageCalories('');
+      setImageLoading(false);
+      notify('تم تحميل الصورة، أدخل تقدير السعرات');
+    };
+    reader.onerror = () => {
+      setImageLoading(false);
+      notify('تعذر قراءة الصورة، جرّب صورة أخرى');
+    };
+    reader.readAsDataURL(file);
+  };
+  const clearImage = () => {
+    setImagePreview(null);
+    setImageName('');
+    setImageCalories('');
+    setResult(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+  const estimateImage = () => {
+    const calories = Number(imageCalories);
+    if (!imagePreview || !Number.isFinite(calories) || calories <= 0) {
+      notify('أدخل سعرات تقريبية للصورة أولاً');
+      return;
+    }
+    const food = { label: imageName ? `وجبة من ${imageName}` : 'وجبة من الصورة', calories: Math.round(calories), portion: 'تقدير يدوي', detail: 'الصورة للمعاينة فقط ولا يتم حفظ ملفها', icon: Utensils };
+    setResult(food);
+    recordScanned({ query: `صورة:${imageName}`, label: food.label, calories: food.calories });
+    notify('تم تجهيز تقدير وجبتك');
   };
   return <div className="mx-auto max-w-[1080px] p-5 md:p-9 lg:p-12" dir="rtl">
     <PageHeader eyebrow="خمن، سجّل، وواصل" title="قدّر وجبتك" description="اكتب اسم الطعام كما تقوله في البيت، أو ارفع صورة لطبقك. الرقم تقريبي، والغرض أن يساعدك لا أن يقيّدك." />
     <div className="grid gap-5 lg:grid-cols-[1.15fr_.85fr]">
-      <section className="card-surface rounded-[24px] p-5 md:p-7"><div className="mb-6 flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[hsl(var(--secondary))] text-[hsl(var(--primary))]"><Utensils size={19} /></span><div><h2 className="display-font text-lg font-bold">ما الذي أكلته؟</h2><p className="text-xs text-[hsl(var(--muted-foreground))]">قاعدة رفيق المحلية جاهزة لك</p></div></div><div className="flex gap-2"><input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && estimate()} placeholder="مثال: فول مع زيت، شوفان..." className="min-w-0 flex-1 rounded-xl border bg-[hsl(var(--background))] px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]" aria-label="اسم الطعام" data-testid="input-food-search" /><button onClick={estimate} className="rounded-xl bg-[hsl(var(--primary))] px-5 text-sm font-bold text-[hsl(var(--primary-foreground))]" data-testid="button-estimate-food">قدّر</button></div>{matches.length > 0 && <div className="mt-2 rounded-xl border bg-[hsl(var(--card))] p-1">{matches.slice(0, 3).map((food) => <button key={food.label} onClick={() => { setQuery(food.label); setResult(food); }} className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-right text-xs hover:bg-[hsl(var(--muted))]" data-testid={`button-suggestion-${food.label}`}><span>{food.label}</span><span className="text-[hsl(var(--muted-foreground))]">{food.calories} سعرة</span></button>)}</div>}<div className="my-6 flex items-center gap-3 text-[10px] font-bold text-[hsl(var(--muted-foreground))]"><span className="h-px flex-1 bg-[hsl(var(--border))]" /> أو <span className="h-px flex-1 bg-[hsl(var(--border))]" /></div><button onClick={upload} disabled={imageLoading} className="paper-grid flex w-full flex-col items-center justify-center rounded-2xl border border-dashed border-[hsl(var(--primary)/.35)] px-5 py-7 text-center transition-colors hover:bg-[hsl(var(--secondary)/.35)] disabled:opacity-60" data-testid="button-upload-food-image"><span className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-[hsl(var(--secondary))] text-[hsl(var(--primary))]">{imageLoading ? <span className="h-5 w-5 animate-pulse rounded-full bg-[hsl(var(--accent))]" /> : <Upload size={19} />}</span><strong className="text-sm">{imageLoading ? 'رفيق يقرأ الصورة...' : 'صوّر طبقك أو ارفع صورة'}</strong><span className="mt-1 text-[11px] text-[hsl(var(--muted-foreground))]">محاكاة تقدير الصورة — بدون رفع فعلي</span></button>{loading && <div className="mt-5 rounded-2xl bg-[hsl(var(--muted)/.6)] p-5"><div className="h-3 w-2/3 animate-pulse rounded bg-[hsl(var(--border))]" /><div className="mt-3 h-3 w-1/3 animate-pulse rounded bg-[hsl(var(--border))]" /></div>}{result && <EstimateResult food={result} onAdd={() => addCalories(result.calories, result.label)} />}</section>
+      <section className="card-surface rounded-[24px] p-5 md:p-7"><div className="mb-6 flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[hsl(var(--secondary))] text-[hsl(var(--primary))]"><Utensils size={19} /></span><div><h2 className="display-font text-lg font-bold">ما الذي أكلته؟</h2><p className="text-xs text-[hsl(var(--muted-foreground))]">اكتب اسم الطعام أو ارفع صورة حقيقية</p></div></div><div className="flex gap-2"><input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && estimate()} placeholder="مثال: فول مع زيت، شوفان..." className="min-w-0 flex-1 rounded-xl border bg-[hsl(var(--background))] px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]" aria-label="اسم الطعام" data-testid="input-food-search" /><button onClick={estimate} className="rounded-xl bg-[hsl(var(--primary))] px-5 text-sm font-bold text-[hsl(var(--primary-foreground))]" data-testid="button-estimate-food">قدّر</button></div>{matches.length > 0 && <div className="mt-2 rounded-xl border bg-[hsl(var(--card))] p-1">{matches.slice(0, 3).map((food) => <button key={food.label} onClick={() => { setQuery(food.label); setResult(food); }} className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-right text-xs hover:bg-[hsl(var(--muted))]" data-testid={`button-suggestion-${food.label}`}><span>{food.label}</span><span className="text-[hsl(var(--muted-foreground))]">{food.calories} سعرة</span></button>)}</div>}<div className="my-6 flex items-center gap-3 text-[10px] font-bold text-[hsl(var(--muted-foreground))]"><span className="h-px flex-1 bg-[hsl(var(--border))]" /> أو <span className="h-px flex-1 bg-[hsl(var(--border))]" /></div><input ref={fileInputRef} onChange={handleImageChange} type="file" accept="image/*" className="hidden" data-testid="input-food-image" /><button onClick={openImagePicker} disabled={imageLoading} className="paper-grid flex w-full flex-col items-center justify-center rounded-2xl border border-dashed border-[hsl(var(--primary)/.35)] px-5 py-7 text-center transition-colors hover:bg-[hsl(var(--secondary)/.35)] disabled:opacity-60" data-testid="button-upload-food-image"><span className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-[hsl(var(--secondary))] text-[hsl(var(--primary))]">{imageLoading ? <span className="h-5 w-5 animate-pulse rounded-full bg-[hsl(var(--accent))]" /> : <Upload size={19} />}</span><strong className="text-sm">{imageLoading ? 'جارٍ تجهيز الصورة...' : 'صوّر طبقك أو ارفع صورة'}</strong><span className="mt-1 text-[11px] text-[hsl(var(--muted-foreground))]">JPG وPNG حتى ٨ ميغابايت</span></button>{imagePreview && <div className="mt-4 rounded-2xl border bg-[hsl(var(--muted)/.35)] p-3"><div className="relative overflow-hidden rounded-xl"><img src={imagePreview} alt={`معاينة ${imageName}`} className="max-h-56 w-full object-cover" /><button onClick={clearImage} className="absolute left-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-[hsl(var(--foreground)/.75)] text-[hsl(var(--background))]" aria-label="إزالة الصورة" data-testid="button-remove-food-image"><X size={16} /></button></div><p className="mt-2 truncate text-xs font-semibold">{imageName}</p><div className="mt-3 flex gap-2"><input value={imageCalories} onChange={(e) => setImageCalories(e.target.value)} type="number" min="1" placeholder="السعرات التقريبية" className="min-w-0 flex-1 rounded-xl border bg-[hsl(var(--card))] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]" dir="ltr" aria-label="السعرات التقريبية للصورة" data-testid="input-image-calories" /><button onClick={estimateImage} className="rounded-xl bg-[hsl(var(--primary))] px-4 py-2 text-xs font-bold text-[hsl(var(--primary-foreground))]" data-testid="button-estimate-uploaded-image">اعتماد التقدير</button></div><p className="mt-2 text-[10px] leading-5 text-[hsl(var(--muted-foreground))]">لا يتم تخزين ملف الصورة. أدخل تقديراً تقريبياً حسب كمية الطبق.</p></div>}{loading && <div className="mt-5 rounded-2xl bg-[hsl(var(--muted)/.6)] p-5"><div className="h-3 w-2/3 animate-pulse rounded bg-[hsl(var(--border))]" /><div className="mt-3 h-3 w-1/3 animate-pulse rounded bg-[hsl(var(--border))]" /></div>}{result && <EstimateResult food={result} onAdd={() => addCalories(result.calories, result.label)} />}</section>
       <section className="rounded-[24px] bg-[hsl(var(--secondary)/.45)] p-5 md:p-7"><div className="mb-5 flex items-center justify-between"><div><h2 className="display-font text-lg font-bold">اقتراحات سريعة</h2><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">اختَر وجبة شائعة وابدأ منها</p></div><Zap size={20} className="text-[hsl(var(--accent))]" /></div><div className="space-y-2.5">{foodKnowledge.slice(0, 4).map((food) => <button key={food.label} onClick={() => { setQuery(food.label); setResult(food); }} className="flex w-full items-center gap-3 rounded-2xl border border-[hsl(var(--border)/.7)] bg-[hsl(var(--card)/.7)] p-3 text-right hover:bg-[hsl(var(--card))]" data-testid={`button-quick-food-${food.label}`}><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[hsl(var(--card))] text-[hsl(var(--primary))]"><food.icon size={18} /></span><span className="min-w-0 flex-1"><strong className="block text-xs">{food.label}</strong><small className="text-[10px] text-[hsl(var(--muted-foreground))]">{food.portion}</small></span><span className="text-xs font-bold text-[hsl(var(--primary))]">{food.calories} <small>سعرة</small></span></button>)}</div><div className="mt-6 flex gap-2 rounded-xl border border-[hsl(var(--border)/.8)] bg-[hsl(var(--card)/.5)] p-3 text-[11px] leading-5 text-[hsl(var(--muted-foreground))]"><CircleHelp size={15} className="mt-0.5 shrink-0 text-[hsl(var(--primary))]" /> التقديرات تختلف حسب طريقة التحضير. استخدمها كبوصلة لا كحساب دقيق.</div></section>
     </div>
   </div>;
